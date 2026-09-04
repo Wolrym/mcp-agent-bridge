@@ -15,6 +15,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from core import backups, projects  # noqa: E402
+from core.config import settings  # noqa: E402
 from servers.tools_files import _page  # noqa: E402
 
 failures = []
@@ -40,80 +41,85 @@ def change(action: str, path: Path, apply, destination: Path | None = None) -> s
 
 
 def main() -> int:
-    scratch = projects.active_root() / "_undo_scratch"
-    if scratch.exists():
-        shutil.rmtree(scratch)
-    scratch.mkdir(parents=True)
-
-    target = scratch / "note.txt"
-
-    # 1. Overwrite, then undo -> old contents come back.
-    write(target, "first\n")
-    change(backups.WRITE, target, lambda: write(target, "second\n"))
-    backups.undo()
-    check("overwrite is reverted", target.read_text(encoding="utf-8") == "first\n")
-
-    # 2. Creating a new file, undone, removes it again.
-    created = scratch / "fresh.txt"
-    change(backups.WRITE, created, lambda: write(created, "hello\n"))
-    backups.undo()
-    check("created file is removed", not created.exists())
-
-    # 3. Undo refuses when the file moved on since the change.
-    change(backups.EDIT, target, lambda: write(target, "edited\n"))
-    write(target, "edited by hand\n")
-    refused = False
+    was_enabled = backups.is_enabled()
+    settings.set("backups", "enabled", True)
     try:
+        scratch = projects.active_root() / "_undo_scratch"
+        if scratch.exists():
+            shutil.rmtree(scratch)
+        scratch.mkdir(parents=True)
+
+        target = scratch / "note.txt"
+
+        # 1. Overwrite, then undo -> old contents come back.
+        write(target, "first\n")
+        change(backups.WRITE, target, lambda: write(target, "second\n"))
         backups.undo()
-    except backups.BackupError:
-        refused = True
-    check("refuses to discard newer work", refused)
-    check("file untouched after refusal",
-          target.read_text(encoding="utf-8") == "edited by hand\n")
+        check("overwrite is reverted", target.read_text(encoding="utf-8") == "first\n")
 
-    # 4. ...but force gets the old version back.
-    backups.undo(force=True)
-    check("force restores the old version",
-          target.read_text(encoding="utf-8") == "first\n")
+        # 2. Creating a new file, undone, removes it again.
+        created = scratch / "fresh.txt"
+        change(backups.WRITE, created, lambda: write(created, "hello\n"))
+        backups.undo()
+        check("created file is removed", not created.exists())
 
-    # 5. Delete, then undo -> file is back with its contents.
-    change(backups.DELETE, target, target.unlink)
-    check("file is gone after delete", not target.exists())
-    backups.undo()
-    check("deleted file is restored",
-          target.exists() and target.read_text(encoding="utf-8") == "first\n")
+        # 3. Undo refuses when the file moved on since the change.
+        change(backups.EDIT, target, lambda: write(target, "edited\n"))
+        write(target, "edited by hand\n")
+        refused = False
+        try:
+            backups.undo()
+        except backups.BackupError:
+            refused = True
+        check("refuses to discard newer work", refused)
+        check("file untouched after refusal",
+              target.read_text(encoding="utf-8") == "edited by hand\n")
 
-    # 6. Move, then undo -> back at the original path.
-    moved = scratch / "renamed.txt"
-    change(backups.MOVE, target, lambda: shutil.move(str(target), str(moved)), destination=moved)
-    backups.undo()
-    check("move is reverted", target.exists() and not moved.exists())
+        # 4. ...but force gets the old version back.
+        backups.undo(force=True)
+        check("force restores the old version",
+              target.read_text(encoding="utf-8") == "first\n")
 
-    # 7. Undoing twice is refused, and history reflects it.
-    twice_refused = False
-    try:
-        backups.undo(change_id=backups.history(limit=1)[0]["id"])
-    except backups.BackupError:
-        twice_refused = True
-    check("an undone change cannot be undone again", twice_refused)
+        # 5. Delete, then undo -> file is back with its contents.
+        change(backups.DELETE, target, target.unlink)
+        check("file is gone after delete", not target.exists())
+        backups.undo()
+        check("deleted file is restored",
+              target.exists() and target.read_text(encoding="utf-8") == "first\n")
 
-    # 8. Paged reads.
-    body = "\n".join("line " + str(n) for n in range(1, 51))
-    whole = _page(body, Path("x.txt"), 0, 0)
-    check("short file is returned whole", whole == body)
+        # 6. Move, then undo -> back at the original path.
+        moved = scratch / "renamed.txt"
+        change(backups.MOVE, target, lambda: shutil.move(str(target), str(moved)), destination=moved)
+        backups.undo()
+        check("move is reverted", target.exists() and not moved.exists())
 
-    part = _page(body, Path("x.txt"), 1, 10)
-    check("first page has a header", part.startswith("[x.txt: lines 1-10 of 50]"))
-    check("first page stops at the budget", "line 10" in part and "line 11" not in part)
-    check("first page says how to continue", "offset=11" in part)
+        # 7. Undoing twice is refused, and history reflects it.
+        twice_refused = False
+        try:
+            backups.undo(change_id=backups.history(limit=1)[0]["id"])
+        except backups.BackupError:
+            twice_refused = True
+        check("an undone change cannot be undone again", twice_refused)
 
-    tail = _page(body, Path("x.txt"), 45, 10)
-    check("last page has no continuation", "truncated" not in tail and "line 50" in tail)
+        # 8. Paged reads.
+        body = "\n".join("line " + str(n) for n in range(1, 51))
+        whole = _page(body, Path("x.txt"), 0, 0)
+        check("short file is returned whole", whole == body)
 
-    past = _page(body, Path("x.txt"), 500, 10)
-    check("offset past the end is explained", "past the end" in past)
+        part = _page(body, Path("x.txt"), 1, 10)
+        check("first page has a header", part.startswith("[x.txt: lines 1-10 of 50]"))
+        check("first page stops at the budget", "line 10" in part and "line 11" not in part)
+        check("first page says how to continue", "offset=11" in part)
 
-    shutil.rmtree(scratch, ignore_errors=True)
+        tail = _page(body, Path("x.txt"), 45, 10)
+        check("last page has no continuation", "truncated" not in tail and "line 50" in tail)
+
+        past = _page(body, Path("x.txt"), 500, 10)
+        check("offset past the end is explained", "past the end" in past)
+
+        shutil.rmtree(scratch, ignore_errors=True)
+    finally:
+        settings.set("backups", "enabled", was_enabled)
 
     print()
     if failures:

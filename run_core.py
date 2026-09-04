@@ -182,6 +182,7 @@ def _print_config() -> None:
     print("tunnel config : " + (t["config_file"] or "(not set)"))
     print("tunnel domain : " + str(t.get("domain", "wolroom.store")))
     print("tunnel user   : " + str(t.get("user_slug") or "(none / default)"))
+    print("backups       : " + ("enabled" if data.get("backups", {}).get("enabled", False) else "disabled"))
     for label, url in tunnel.public_urls().items():
         print(label.ljust(14) + ": " + url)
 
@@ -227,6 +228,16 @@ def _apply_cli_settings(args: argparse.Namespace) -> bool:
         print(f"tunnel domain set to '{domain}', user prefix set to '{user_slug}'")
         handled = True
 
+    if args.enable_backups:
+        settings.set("backups", "enabled", True)
+        print("backups.enabled set to true")
+        handled = True
+
+    if args.disable_backups:
+        settings.set("backups", "enabled", False)
+        print("backups.enabled set to false")
+        handled = True
+
     if args.regenerate_token:
         token = settings.regenerate_token()
         print("new auth token: " + token)
@@ -242,6 +253,12 @@ def main(argv: list | None = None) -> int:
     )
     parser.add_argument(
         "--print-config", action="store_true", help="Show settings and exit."
+    )
+    parser.add_argument(
+        "--enable-backups", action="store_true", help="Enable .mcp-backups creation."
+    )
+    parser.add_argument(
+        "--disable-backups", action="store_true", help="Disable .mcp-backups creation."
     )
     parser.add_argument(
         "--domain", metavar="DOMAIN",

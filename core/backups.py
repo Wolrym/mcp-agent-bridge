@@ -56,6 +56,23 @@ def _limit(name: str, fallback: int) -> int:
     return int(settings.get("limits", name, default=fallback) or fallback)
 
 
+def is_enabled() -> bool:
+    """Return True if file backups are enabled in settings."""
+    return bool(settings.get("backups", "enabled", default=False))
+
+
+def delete_backups(project_root: Path | str | None = None) -> tuple[bool, str]:
+    """Delete .mcp-backups directory from the specified or active project root."""
+    target_root = Path(project_root or projects.active_root()) / DIR_NAME
+    if not target_root.exists():
+        return True, "No .mcp-backups folder found in active project."
+    try:
+        shutil.rmtree(target_root)
+        return True, f"Removed {DIR_NAME} from active project."
+    except OSError as exc:
+        return False, f"Failed to delete {DIR_NAME}: {exc}"
+
+
 def root() -> Path:
     return projects.active_root() / DIR_NAME
 
@@ -146,6 +163,9 @@ def record_before(action: str, path: Path, destination: Path | None = None) -> d
         "blob": "",
         "note": "",
     }
+    if not is_enabled():
+        entry["note"] = "backups disabled in settings"
+        return entry
     if is_backup_path(path):
         entry["note"] = "inside the backup folder, not tracked"
         return entry
@@ -165,7 +185,10 @@ def record_before(action: str, path: Path, destination: Path | None = None) -> d
 
 def record_after(entry: dict, summary: str = "") -> str:
     """Finish an entry after the change succeeded and write it down."""
-    if entry.get("note") == "inside the backup folder, not tracked":
+    if not is_enabled() or entry.get("note") in (
+        "inside the backup folder, not tracked",
+        "backups disabled in settings",
+    ):
         return ""
     try:
         result_path = Path(entry["destination"] or entry["path"])

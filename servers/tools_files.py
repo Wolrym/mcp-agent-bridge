@@ -363,9 +363,13 @@ def register(mcp) -> None:
         except Exception as exc:  # noqa: BLE001
             return _error(exc)
         if not items:
+            if not backups.is_enabled():
+                return "File backups are disabled in settings (no recorded changes)."
             return "No recorded changes in this project yet."
 
         lines = []
+        if not backups.is_enabled():
+            lines.append("[Notice: File backups are currently disabled in settings]")
         for item in items:
             flag = " [undone]" if item.get("undone") else ""
             note = item.get("note") or ""
@@ -389,6 +393,8 @@ def register(mcp) -> None:
                 change that has not been undone yet.
             force: Undo even when the file changed after that operation.
         """
+        if not backups.is_enabled() and not backups.root().exists():
+            return "Error: File backups are disabled in settings and no undo history exists."
         try:
             result = backups.undo(change_id=change_id, force=force)
         except Exception as exc:  # noqa: BLE001

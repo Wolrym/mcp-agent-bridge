@@ -67,6 +67,7 @@ DEFAULTS: dict[str, Any] = {
         "wait_seconds_max": 50,
     },
     "security": {"allow_outside_project": False},
+    "backups": {"enabled": False},
     # GUI-only preferences. `autostart` brings the servers and the tunnel up
     # as soon as the panel opens, so the machine is reachable without a
     # click. The headless CLI ignores it: there, starting is the whole point.
@@ -163,6 +164,10 @@ class SettingsStore:
             changed = True
         if "user_slug" not in tunnel_cfg:
             tunnel_cfg["user_slug"] = ""
+            changed = True
+
+        if "backups" not in self._data:
+            self._data["backups"] = {"enabled": False}
             changed = True
         return changed
 

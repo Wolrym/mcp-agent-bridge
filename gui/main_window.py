@@ -37,7 +37,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from core import health, logs, projects, tunnel
+from core import backups, health, logs, projects, tunnel
 from core.config import settings
 from gui.widgets.chrome import install_frameless
 from gui.widgets.primitives import (
@@ -369,6 +369,36 @@ class MainWindow(QMainWindow):
                 "muted",
             )
         )
+        card.add(separator())
+
+        self._backups_switch = Switch()
+        self._backups_switch.toggled.connect(self._set_backups_enabled)
+
+        clean_backups_btn = button(
+            "Clean .mcp-backups",
+            "secondary",
+            "Delete the .mcp-backups folder from the active project",
+        )
+        clean_backups_btn.clicked.connect(self._clean_active_project_backups)
+
+        card.add(
+            row(
+                self._backups_switch,
+                label(
+                    "Create file backups (.mcp-backups) in project folders",
+                    "muted",
+                ),
+                clean_backups_btn,
+                spacing=10,
+            )
+        )
+        card.add(
+            label(
+                "Keeps previous versions of edited and deleted files for undo_change. "
+                "Turn off if you want clean project folders with zero background files.",
+                "muted",
+            )
+        )
         return card
 
     def _connection_card(self) -> Card:
@@ -480,6 +510,40 @@ class MainWindow(QMainWindow):
             + ("enabled" if enabled else "disabled"),
             level="warn" if enabled else "info",
         )
+
+    def _set_backups_enabled(self, enabled: bool) -> None:
+        settings.set("backups", "enabled", bool(enabled))
+        logs.log(
+            "gui",
+            "File backups (.mcp-backups) "
+            + ("enabled" if enabled else "disabled"),
+            level="info",
+        )
+
+    def _clean_active_project_backups(self) -> None:
+        try:
+            active = projects.active_project()
+        except Exception:
+            active = None
+
+        proj_name = active["name"] if active else "active project"
+        confirm = QMessageBox.question(
+            self,
+            "Clean .mcp-backups?",
+            f"Delete the .mcp-backups folder from '{proj_name}'?\n\n"
+            "This will permanently remove all previous undo history and backups for this project.",
+            QMessageBox.Yes | QMessageBox.Cancel,
+            QMessageBox.Cancel,
+        )
+        if confirm != QMessageBox.Yes:
+            return
+
+        ok, msg = backups.delete_backups()
+        logs.log("backups", msg, level="info" if ok else "warn")
+        if ok:
+            QMessageBox.information(self, "Cleaned", msg)
+        else:
+            QMessageBox.warning(self, "Error", msg)
 
     def _on_tunnel_inputs_changed(self) -> None:
         cfg = settings.get("tunnel", default={}) or {}
@@ -767,6 +831,11 @@ class MainWindow(QMainWindow):
         self._allow_outside.blockSignals(True)
         self._allow_outside.setChecked(allow_outside)
         self._allow_outside.blockSignals(False)
+
+        backups_enabled = bool(data.get("backups", {}).get("enabled", False))
+        self._backups_switch.blockSignals(True)
+        self._backups_switch.setChecked(backups_enabled)
+        self._backups_switch.blockSignals(False)
 
         self._render_projects(data)
         self._refresh_status()
