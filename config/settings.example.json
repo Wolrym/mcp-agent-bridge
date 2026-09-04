@@ -1,0 +1,33 @@
+{
+  "version": 1,
+  "auth": {
+    "token": "",
+    "enabled": true
+  },
+  "servers": {
+    "host": "127.0.0.1",
+    "files_port": 9300,
+    "terminal_port": 9301,
+    "http_path": "/mcp"
+  },
+  "tunnel": {
+    "enabled": false,
+    "binary": "cloudflared",
+    "tunnel_name": "notion-sync",
+    "config_file": "",
+    "files_hostname": "mcp-files.wolroom.store",
+    "terminal_hostname": "mcp-term.wolroom.store"
+  },
+  "limits": {
+    "command_timeout": 60,
+    "max_output_chars": 100000,
+    "max_read_bytes": 5000000,
+    "max_results": 300
+  },
+  "security": {
+    "allow_outside_project": false
+  },
+  "skills_root": "",
+  "projects": [],
+  "active_project_id": null
+}

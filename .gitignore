@@ -1,0 +1,11 @@
+__pycache__/
+*.pyc
+.venv/
+config/settings.json
+logs/
+.mcp-backups/
+.mcp-runs/
+.vscode/
+.idea/
+*.bak
+
