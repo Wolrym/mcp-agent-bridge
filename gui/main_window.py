@@ -5,34 +5,41 @@ The window is a thin shell over the core: it starts and stops the same
 `core.projects`, and mirrors `core.logs` into a live view. No business
 logic lives here, so the headless mode stays fully usable on its own.
 
-The native Windows frame is replaced by our own title bar (see
-`gui.widgets.chrome`), so the whole window follows the same dark theme.
+Layout: our own title bar (see `gui.widgets.chrome`) over a sidebar and a
+content panel. The sidebar holds the one action that runs the whole
+stack, the pages, and the active project - the three things you reach for
+most. Each page is a column of groups in the style of a settings screen.
 
 Two status layers are deliberately kept apart:
-  * the per-card badges say whether a process was started by us;
+  * the badges on the pages say whether a process was started by us;
   * the pill in the title bar says whether the endpoints actually answer,
     which is the only thing that tells you a client can reach the machine.
 
 Button convention, kept narrow so nothing looks random:
-  * default     - the one obvious action of a card
-  * secondary   - every other action next to it
+  * default     - the one obvious action on screen (light)
+  * secondary   - every other action
   * destructive - anything that throws work away
+  * ghost       - quiet extras
 """
 from __future__ import annotations
 
+import html
+import time
+from collections import deque
 from concurrent.futures import ThreadPoolExecutor
 
-from PySide6.QtCore import QObject, Qt, QTimer, Signal
+from PySide6.QtCore import QObject, Qt, QTimer, QUrl, Signal
+from PySide6.QtGui import QDesktopServices, QKeySequence, QShortcut
 from PySide6.QtWidgets import (
+    QButtonGroup,
     QFileDialog,
+    QFrame,
     QHBoxLayout,
     QLineEdit,
-    QListWidget,
-    QListWidgetItem,
     QMainWindow,
     QMessageBox,
     QPlainTextEdit,
-    QScrollArea,
+    QStackedWidget,
     QVBoxLayout,
     QWidget,
 )
@@ -41,17 +48,27 @@ from core import backups, health, logs, notifier, projects, tunnel
 from core.config import settings
 from gui.widgets.chrome import install_frameless
 from gui.widgets.primitives import (
+    Backdrop,
     Badge,
-    Card,
-    CopyField,
+    CopyRow,
+    ElidedLabel,
+    GlyphButton,
+    Group,
+    NavButton,
+    Page,
+    Segmented,
+    SettingRow,
     Switch,
     button,
     label,
-    row,
-    separator,
+    repolish,
 )
 from gui.widgets.setup_guide import SetupGuideDialog
+from gui.widgets.tokens import COLORS
 from run_core import ServerSupervisor
+
+APP_TITLE = "MCP Agent Bridge"
+SIDEBAR_WIDTH = 228
 
 # How a readiness state is presented.
 HEALTH_TONES = {
@@ -60,6 +77,18 @@ HEALTH_TONES = {
     health.STARTING: "warning",
     health.OFFLINE: "danger",
 }
+
+# Sidebar pages: key, label, icon.
+PAGES = (
+    ("overview", "Overview", "overview"),
+    ("projects", "Projects", "projects"),
+    ("tunnel", "Tunnel", "tunnel"),
+    ("security", "Security", "security"),
+    ("notifications", "Notifications", "notifications"),
+    ("activity", "Activity", "activity"),
+)
+
+LOG_FILTERS = (("all", "All"), ("calls", "Calls"), ("problems", "Problems"))
 
 
 class _Bridge(QObject):
@@ -70,11 +99,44 @@ class _Bridge(QObject):
     health_checked = Signal(dict)
 
 
+class _ProjectChip(QFrame):
+    """The active project at the bottom of the sidebar; click to manage."""
+
+    clicked = Signal()
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.setObjectName("projectChip")
+        self.setCursor(Qt.PointingHandCursor)
+        self.setAttribute(Qt.WA_Hover, True)
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(12, 9, 12, 10)
+        layout.setSpacing(1)
+        self.name = ElidedLabel("", "chipName", Qt.ElideRight)
+        self.name.setTextInteractionFlags(Qt.NoTextInteraction)
+        self.path = ElidedLabel("", "chipPath", Qt.ElideMiddle)
+        self.path.setTextInteractionFlags(Qt.NoTextInteraction)
+        layout.addWidget(self.name)
+        layout.addWidget(self.path)
+
+    def mousePressEvent(self, event) -> None:  # noqa: N802 - Qt naming
+        if event.button() == Qt.LeftButton:
+            self.clicked.emit()
+
+
+def _input(placeholder: str, width: int = 260) -> QLineEdit:
+    field = QLineEdit()
+    field.setPlaceholderText(placeholder)
+    field.setFixedWidth(width)
+    return field
+
+
 class MainWindow(QMainWindow):
     def __init__(self) -> None:
         super().__init__()
-        self.resize(940, 860)
-        self._chrome = install_frameless(self, "MCP Control Panel")
+        self.resize(1120, 780)
+        self.setMinimumSize(820, 560)
+        self._chrome = install_frameless(self, APP_TITLE)
 
         self._supervisor = ServerSupervisor()
         self._bridge = _Bridge()
@@ -86,6 +148,12 @@ class MainWindow(QMainWindow):
         self._probe_pool = ThreadPoolExecutor(max_workers=1)
         self._probe_busy = False
         self._health_state = ""
+
+        self._records: deque = deque(maxlen=2000)
+        self._log_filter = "all"
+        # The overview shows public URLs when there are any, until the user
+        # picks a side himself.
+        self._endpoint_mode_touched = False
 
         self._build_ui()
 
@@ -109,43 +177,32 @@ class MainWindow(QMainWindow):
     # --- layout ----------------------------------------------------------
 
     def _build_ui(self) -> None:
-        content = QWidget()
-        layout = QVBoxLayout(content)
-        layout.setContentsMargins(28, 22, 16, 24)
-        layout.setSpacing(16)
-
-        layout.addWidget(self._header())
-        layout.addWidget(self._servers_card())
-        layout.addWidget(self._tunnel_card())
-        layout.addWidget(self._projects_card())
-        layout.addWidget(self._connection_card())
-        layout.addWidget(self._notifications_card())
-        layout.addWidget(self._logs_card(), 1)
-
-        scroll = QScrollArea()
-        scroll.setWidgetResizable(True)
-        scroll.setFrameShape(QScrollArea.NoFrame)
-        scroll.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOn)
-        scroll.setWidget(content)
-        # Without this the viewport fills itself from the palette and paints
-        # a square over the shell's rounded bottom-left corner.
-        scroll.viewport().setAutoFillBackground(False)
-        content.setAutoFillBackground(False)
-
-        # The title bar carries the two things worth seeing without
-        # scrolling: the one button that runs the whole stack, and whether
-        # an MCP client can actually reach it.
-        self._master_button = button(
-            "Start everything",
-            "default",
-            "Start or stop the servers and the tunnel together",
-        )
-        self._master_button.setObjectName("titleAction")
-        self._master_button.clicked.connect(self._toggle_everything)
-        self._chrome.title_bar.add_widget(self._master_button)
-
+        # Whether a client can reach the machine, visible from every page.
         self._health_pill = Badge("Checking...", "neutral")
         self._chrome.title_bar.add_widget(self._health_pill)
+
+        self._pages = QStackedWidget()
+        self._page_index: dict = {}
+        for key, builder in (
+            ("overview", self._overview_page),
+            ("projects", self._projects_page),
+            ("tunnel", self._tunnel_page),
+            ("security", self._security_page),
+            ("notifications", self._notifications_page),
+            ("activity", self._activity_page),
+        ):
+            self._page_index[key] = self._pages.addWidget(builder())
+
+        backdrop = Backdrop()
+        backdrop_layout = QVBoxLayout(backdrop)
+        backdrop_layout.setContentsMargins(1, 1, 1, 1)
+        backdrop_layout.addWidget(self._pages)
+
+        body = QHBoxLayout()
+        body.setContentsMargins(0, 0, 8, 8)
+        body.setSpacing(0)
+        body.addWidget(self._sidebar())
+        body.addWidget(backdrop, 1)
 
         # The shell paints the window border now that there is no native
         # one. The 1px margin keeps children from covering that border.
@@ -156,389 +213,355 @@ class MainWindow(QMainWindow):
         shell_layout.setContentsMargins(1, 1, 1, 1)
         shell_layout.setSpacing(0)
         shell_layout.addWidget(self._chrome.title_bar)
-        shell_layout.addWidget(scroll, 1)
-
+        shell_layout.addLayout(body, 1)
         self.setCentralWidget(self._shell)
 
-    def _header(self) -> QWidget:
-        container = QWidget()
-        layout = QHBoxLayout(container)
-        layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(12)
+        for number, (key, _text, _icon) in enumerate(PAGES, start=1):
+            shortcut = QShortcut(QKeySequence("Ctrl+" + str(number)), self)
+            shortcut.activated.connect(lambda k=key: self.show_page(k))
+        self.show_page("overview")
 
-        titles = QVBoxLayout()
-        titles.setSpacing(2)
-        titles.addWidget(label("MCP Control Panel", "title"))
-        titles.addWidget(
-            label(
-                "MCP servers for AI agents, running on this machine.",
-                "subtitle",
-            )
+    def _sidebar(self) -> QWidget:
+        sidebar = QWidget()
+        sidebar.setObjectName("sidebar")
+        sidebar.setFixedWidth(SIDEBAR_WIDTH)
+        layout = QVBoxLayout(sidebar)
+        layout.setContentsMargins(10, 6, 10, 10)
+        layout.setSpacing(2)
+
+        # The one button that runs the whole stack. Light while there is
+        # something to start, quiet once it runs.
+        self._master_button = GlyphButton(
+            "Start everything", "play", "default",
+            "Start or stop the servers and the tunnel together",
         )
-        layout.addLayout(titles, 1)
+        self._master_button.setObjectName("masterAction")
+        self._master_button.clicked.connect(self._toggle_everything)
+        layout.addWidget(self._master_button)
+        layout.addSpacing(14)
 
-        guide_button = button("Setup guide", "secondary")
-        guide_button.clicked.connect(self._open_guide)
-        layout.addWidget(guide_button, 0, Qt.AlignTop)
-        return container
+        self._nav = QButtonGroup(self)
+        self._nav.setExclusive(True)
+        self._nav_buttons: dict = {}
+        for key, text, icon in PAGES:
+            item = NavButton(text, icon)
+            item.clicked.connect(lambda _checked=False, k=key: self.show_page(k))
+            self._nav.addButton(item)
+            self._nav_buttons[key] = item
+            layout.addWidget(item)
 
-    def _controls(self, *widgets: QWidget, align_right: bool = False) -> QWidget:
-        """A horizontal strip of buttons."""
-        container = QWidget()
-        layout = QHBoxLayout(container)
-        layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(8)
-        if align_right:
-            layout.addStretch(1)
-        for widget in widgets:
-            layout.addWidget(widget)
-        if not align_right:
-            layout.addStretch(1)
-        return container
+        layout.addStretch(1)
 
-    def _servers_card(self) -> Card:
-        card = Card(
-            "Servers",
-            "Files System and Terminal, served over streamable HTTP.",
-        )
+        layout.addWidget(label("Active project", "sidebarCaption"))
+        layout.addSpacing(4)
+        self._project_chip = _ProjectChip()
+        self._project_chip.clicked.connect(lambda: self.show_page("projects"))
+        layout.addWidget(self._project_chip)
+        layout.addSpacing(8)
+
+        guide = NavButton("Setup guide", "guide")
+        guide.setCheckable(False)
+        guide.clicked.connect(self._open_guide)
+        layout.addWidget(guide)
+        return sidebar
+
+    def show_page(self, key: str) -> None:
+        index = self._page_index.get(key)
+        if index is None:
+            return
+        self._pages.setCurrentIndex(index)
+        self._nav_buttons[key].setChecked(True)
+
+    def current_page(self) -> str:
+        index = self._pages.currentIndex()
+        for key, value in self._page_index.items():
+            if value == index:
+                return key
+        return ""
+
+    # --- pages -----------------------------------------------------------
+
+    def _overview_page(self) -> Page:
+        page = Page("Overview", "MCP servers for AI agents, running on this machine.")
+
+        services = Group("Services")
+        self._servers_row = SettingRow("Servers", "Files System and Terminal")
         self._servers_badge = Badge("Stopped", "danger")
-        card.header_extra(self._servers_badge)
-
-        self._files_local = CopyField("Files System (local)")
-        self._terminal_local = CopyField("Terminal (local)")
-        card.add(self._files_local)
-        card.add(self._terminal_local)
-        card.add(separator())
-
-        self._reachability = label("Checking endpoints...", "muted")
-        card.add(self._reachability)
-
-        self._start_button = button("Start")
-        self._start_button.clicked.connect(self._start_servers)
-        self._stop_button = button("Stop", "secondary")
-        self._stop_button.clicked.connect(self._stop_servers)
         self._restart_button = button("Restart", "secondary")
         self._restart_button.clicked.connect(self._restart_servers)
+        self._servers_toggle = button("Start", "secondary")
+        self._servers_toggle.clicked.connect(self._toggle_servers)
+        self._servers_row.add(self._servers_badge)
+        self._servers_row.add(self._restart_button)
+        self._servers_row.add(self._servers_toggle)
+        services.add_row(self._servers_row)
 
-        card.add(
-            self._controls(
-                self._start_button, self._stop_button, self._restart_button
-            )
+        self._tunnel_row = SettingRow("Cloudflare tunnel", "")
+        self._tunnel_badge = Badge("Stopped", "danger")
+        self._tunnel_toggle = button("Start", "secondary")
+        self._tunnel_toggle.clicked.connect(self._toggle_tunnel)
+        self._tunnel_row.add(self._tunnel_badge)
+        self._tunnel_row.add(self._tunnel_toggle)
+        services.add_row(self._tunnel_row)
+
+        # Autostart covers the whole stack, the same as the sidebar button.
+        autostart_row = SettingRow(
+            "Start with the panel",
+            "Bring up the servers and the tunnel as soon as the panel opens.",
         )
-        card.add(separator())
-
-        # Autostart covers the whole stack, the same as the title-bar button.
         self._autostart = Switch()
         self._autostart.toggled.connect(self._set_autostart)
-        card.add(
-            row(
-                self._autostart,
-                label(
-                    "Start the servers and the tunnel as soon as the panel "
-                    "opens",
-                    "muted",
-                ),
-            )
+        autostart_row.add(self._autostart)
+        services.add_row(autostart_row)
+        self._reachability = services._caption
+        services.set_caption("Checking endpoints...")
+        page.add(services)
+
+        connect = Group("Connect a client")
+        self._endpoint_mode = Segmented([("public", "Public"), ("local", "Local")])
+        self._endpoint_mode.changed.connect(self._on_endpoint_mode)
+        connect.header_extra(self._endpoint_mode)
+        self._files_endpoint = CopyRow("Files System")
+        self._terminal_endpoint = CopyRow("Terminal")
+        self._token_overview = CopyRow("Auth token", secret=True)
+        connect.add_row(self._files_endpoint)
+        connect.add_row(self._terminal_endpoint)
+        connect.add_row(self._token_overview)
+        connect.set_caption(
+            "Add both servers to your MCP client: two connections, one Bearer "
+            "token. The setup guide has a ready-made config snippet."
         )
-        return card
+        page.add(connect)
 
-    def _tunnel_card(self) -> Card:
-        card = Card(
-            "Cloudflare tunnel",
-            "Publishes both servers on your own domain.",
+        project = Group("Active project")
+        self._active_row = SettingRow("None", "", mono=True)
+        open_folder = button("Open folder", "secondary")
+        open_folder.clicked.connect(self._open_active_folder)
+        change = button("Change", "secondary")
+        change.clicked.connect(lambda: self.show_page("projects"))
+        self._active_row.add(open_folder)
+        self._active_row.add(change)
+        project.add_row(self._active_row)
+        page.add(project)
+
+        page.finish()
+        return page
+
+    def _projects_page(self) -> Page:
+        page = Page(
+            "Projects",
+            "The active project is the default working folder of every tool.",
         )
-        self._tunnel_badge = Badge("Stopped", "danger")
-        card.header_extra(self._tunnel_badge)
+        add = GlyphButton("Add folder", "plus", "secondary")
+        add.clicked.connect(self._add_project)
+        page.header_extra(add)
 
-        # Domain & user prefix
-        cfg_row = QHBoxLayout()
-        cfg_row.setContentsMargins(0, 0, 0, 0)
-        cfg_row.setSpacing(8)
+        self._projects_group = Group(
+            "Folders",
+            "Switching applies immediately, including to chats that are "
+            "already open.",
+        )
+        page.add(self._projects_group)
 
-        domain_col = QVBoxLayout()
-        domain_col.setContentsMargins(0, 0, 0, 0)
-        domain_col.setSpacing(4)
-        domain_col.addWidget(label("Base domain", "label"))
-        self._domain_input = QLineEdit()
-        self._domain_input.setPlaceholderText("e.g. wolroom.store")
+        files = Group("Files")
+        backups_row = SettingRow(
+            "File backups",
+            "Keep previous versions of edited and deleted files in "
+            ".mcp-backups, so undo_change can restore them. Turn off for "
+            "project folders without background files.",
+        )
+        clean = button("Clean", "ghost", "Delete the .mcp-backups folder of the active project")
+        clean.clicked.connect(self._clean_active_project_backups)
+        self._backups_switch = Switch()
+        self._backups_switch.toggled.connect(self._set_backups_enabled)
+        backups_row.add(clean)
+        backups_row.add(self._backups_switch)
+        files.add_row(backups_row)
+        page.add(files)
+
+        page.finish()
+        return page
+
+    def _tunnel_page(self) -> Page:
+        page = Page("Tunnel", "Cloudflare Tunnel publishes both servers on your own domain.")
+        self._tunnel_page_badge = page.header_extra(Badge("Stopped", "danger"))
+        self._tunnel_page_toggle = page.header_extra(button("Start tunnel", "secondary"))
+        self._tunnel_page_toggle.clicked.connect(self._toggle_tunnel)
+
+        domain = Group("Domain")
+        domain_row = SettingRow("Base domain", "The zone the hostnames live in.")
+        self._domain_input = _input("e.g. example.com")
         self._domain_input.textChanged.connect(self._on_tunnel_inputs_changed)
-        domain_col.addWidget(self._domain_input)
-        cfg_row.addLayout(domain_col, 3)
+        domain_row.add(self._domain_input)
+        domain.add_row(domain_row)
 
-        user_col = QVBoxLayout()
-        user_col.setContentsMargins(0, 0, 0, 0)
-        user_col.setSpacing(4)
-        user_col.addWidget(label("User prefix (optional)", "label"))
-        self._user_slug_input = QLineEdit()
-        self._user_slug_input.setPlaceholderText("e.g. dima")
+        user_row = SettingRow(
+            "User prefix",
+            "Optional. Gives each person their own hostnames on a shared domain.",
+        )
+        self._user_slug_input = _input("e.g. dima")
         self._user_slug_input.textChanged.connect(self._on_tunnel_inputs_changed)
-        user_col.addWidget(self._user_slug_input)
-        cfg_row.addLayout(user_col, 2)
+        user_row.add(self._user_slug_input)
+        domain.add_row(user_row)
 
-        btn_col = QVBoxLayout()
-        btn_col.setContentsMargins(0, 0, 0, 0)
-        btn_col.setSpacing(4)
-        btn_col.addWidget(label(" ", "label"))
+        self._hostnames_row = SettingRow("Hostnames", "", mono=True)
+        self._tunnel_preview = self._hostnames_row._description
         self._apply_tunnel_btn = button("Apply", "default")
         self._apply_tunnel_btn.setEnabled(False)
         self._apply_tunnel_btn.clicked.connect(self._apply_tunnel_settings)
-        btn_col.addWidget(self._apply_tunnel_btn)
-        cfg_row.addLayout(btn_col, 0)
+        self._hostnames_row.add(self._apply_tunnel_btn)
+        domain.add_row(self._hostnames_row)
+        page.add(domain)
 
-        card.add_layout(cfg_row)
+        public = Group(
+            "Public endpoints",
+            "A freshly started tunnel needs a few seconds to register before "
+            "these answer.",
+        )
+        self._files_public = CopyRow("Files System")
+        self._terminal_public = CopyRow("Terminal")
+        public.add_row(self._files_public)
+        public.add_row(self._terminal_public)
+        page.add(public)
 
-        self._tunnel_preview = label("", "muted")
-        card.add(self._tunnel_preview)
-        card.add(separator())
-
-        self._files_public = CopyField("Files System (public)")
-        self._terminal_public = CopyField("Terminal (public)")
-        card.add(self._files_public)
-        card.add(self._terminal_public)
-        card.add(separator())
-
-        self._tunnel_config = CopyField("cloudflared config")
-        card.add(self._tunnel_config)
-
-        self._tunnel_start = button("Start tunnel")
-        self._tunnel_start.clicked.connect(self._start_tunnel)
-        self._tunnel_stop = button("Stop tunnel", "secondary")
-        self._tunnel_stop.clicked.connect(self._stop_tunnel)
-        pick_config = button("Choose config", "secondary")
+        config = Group("cloudflared")
+        self._tunnel_config = CopyRow("Config file")
+        pick_config = button("Choose...", "secondary")
         pick_config.clicked.connect(self._pick_tunnel_config)
+        self._tunnel_config.insert(0, pick_config)
+        config.add_row(self._tunnel_config)
+        page.add(config)
 
-        card.add(self._controls(self._tunnel_start, self._tunnel_stop, pick_config))
-        card.add(
-            label(
-                "A freshly started tunnel needs a few seconds to register "
-                "before the public URLs answer.",
-                "muted",
-            )
+        page.finish()
+        return page
+
+    def _security_page(self) -> Page:
+        page = Page("Security", "Who may connect, and where the tools may go.")
+
+        auth = Group(
+            "Authentication",
+            "The token survives restarts. Clients send it as a Bearer header "
+            "on every request.",
         )
-        return card
-
-    def _projects_card(self) -> Card:
-        card = Card(
-            "Projects",
-            "The active project is the working directory every tool uses.",
+        self._token_field = CopyRow("Auth token", secret=True)
+        auth.add_row(self._token_field)
+        regenerate_row = SettingRow(
+            "Regenerate token",
+            "Every client that uses the old token stops working until it gets "
+            "the new one.",
         )
-        self._project_badge = Badge("None", "neutral")
-        card.header_extra(self._project_badge)
+        regenerate = button("Regenerate", "destructive")
+        regenerate.clicked.connect(self._regenerate_token)
+        regenerate_row.add(regenerate)
+        auth.add_row(regenerate_row)
+        page.add(auth)
 
-        self._project_list = QListWidget()
-        self._project_list.setMinimumHeight(132)
-        self._project_list.setFocusPolicy(Qt.ClickFocus)
-        self._project_list.itemDoubleClicked.connect(
-            lambda _item: self._activate_selected()
+        access = Group("Access")
+        outside_row = SettingRow(
+            "Work outside the active project",
+            "Let tools read and write anywhere on this machine. Off by "
+            "default, so a path mistake cannot touch the rest of the disk. "
+            "Applies to every project.",
         )
-        card.add(self._project_list)
-
-        activate = button("Set active")
-        activate.clicked.connect(self._activate_selected)
-        add = button("Add folder", "secondary")
-        add.clicked.connect(self._add_project)
-        remove = button("Remove", "destructive")
-        remove.clicked.connect(self._remove_selected)
-
-        card.add(self._controls(activate, add, remove))
-        card.add(
-            label(
-                "Switching projects applies immediately, including to chats "
-                "that are already open.",
-                "muted",
-            )
-        )
-        card.add(separator())
-
         self._allow_outside = Switch()
         self._allow_outside.toggled.connect(self._set_allow_outside)
-        card.add(
-            row(
-                self._allow_outside,
-                label(
-                    "Let tools read and write outside the active project "
-                    "folder too",
-                    "muted",
-                ),
-            )
-        )
-        card.add(
-            label(
-                "Off by default so a path mistake cannot touch the rest of "
-                "the machine. Turning this on applies everywhere, not just "
-                "to this one project.",
-                "muted",
-            )
-        )
-        card.add(separator())
+        outside_row.add(self._allow_outside)
+        access.add_row(outside_row)
+        page.add(access)
 
-        self._backups_switch = Switch()
-        self._backups_switch.toggled.connect(self._set_backups_enabled)
+        page.finish()
+        return page
 
-        clean_backups_btn = button(
-            "Clean .mcp-backups",
-            "secondary",
-            "Delete the .mcp-backups folder from the active project",
+    def _notifications_page(self) -> Page:
+        page = Page("Notifications", "A Telegram message when an agent finishes its work.")
+        self._notify_badge = page.header_extra(Badge("Disabled", "neutral"))
+
+        telegram = Group(
+            "Telegram",
+            "Credentials can also come from TELEGRAM_BOT_TOKEN and "
+            "TELEGRAM_CHAT_ID in the environment or a .env file.",
         )
-        clean_backups_btn.clicked.connect(self._clean_active_project_backups)
-
-        card.add(
-            row(
-                self._backups_switch,
-                label(
-                    "Create file backups (.mcp-backups) in project folders",
-                    "muted",
-                ),
-                clean_backups_btn,
-                spacing=10,
-            )
-        )
-        card.add(
-            label(
-                "Keeps previous versions of edited and deleted files for undo_change. "
-                "Turn off if you want clean project folders with zero background files.",
-                "muted",
-            )
-        )
-        return card
-
-    def _connection_card(self) -> Card:
-        card = Card(
-            "Authentication",
-            "Clients send this token as a Bearer header on every request.",
-        )
-        self._token_field = CopyField("Auth token", secret=True)
-        card.add(self._token_field)
-
-        regenerate = button("Regenerate token", "destructive")
-        regenerate.clicked.connect(self._regenerate_token)
-        card.add(self._controls(regenerate))
-
-        card.add(
-            label(
-                "The token survives restarts. Regenerating it invalidates every "
-                "client connection that uses the old one.",
-                "muted",
-            )
-        )
-        return card
-
-    def _notifications_card(self) -> Card:
-        card = Card(
-            "Telegram Notifications",
-            "Receive alerts when an AI agent finishes executing tools or tasks.",
-        )
-        self._notify_badge = Badge("Disabled", "neutral")
-        card.header_extra(self._notify_badge)
-
+        enabled_row = SettingRow("Send notifications", "Message me when an agent goes quiet or calls notify_user.")
         self._notify_enabled = Switch()
         self._notify_enabled.toggled.connect(self._set_notifications_enabled)
-        card.add(
-            row(
-                self._notify_enabled,
-                label("Enable Telegram completion notifications", "muted"),
-            )
-        )
-        card.add(separator())
+        enabled_row.add(self._notify_enabled)
+        telegram.add_row(enabled_row)
 
-        fields_row = QHBoxLayout()
-        fields_row.setContentsMargins(0, 0, 0, 0)
-        fields_row.setSpacing(8)
-
-        token_col = QVBoxLayout()
-        token_col.setContentsMargins(0, 0, 0, 0)
-        token_col.setSpacing(4)
-        token_col.addWidget(label("Bot Token", "label"))
-        self._bot_token_input = QLineEdit()
+        token_row = SettingRow("Bot token", "From @BotFather.")
+        self._bot_token_input = _input("123456:ABC-DEF...", 300)
         self._bot_token_input.setEchoMode(QLineEdit.Password)
-        self._bot_token_input.setPlaceholderText("123456:ABC-DEF1234ghIkl-zyx57W2v1u123ew11")
         self._bot_token_input.textChanged.connect(self._on_notification_fields_changed)
-        token_col.addWidget(self._bot_token_input)
-        fields_row.addLayout(token_col, 3)
+        token_row.add(self._bot_token_input)
+        telegram.add_row(token_row)
 
-        chat_col = QVBoxLayout()
-        chat_col.setContentsMargins(0, 0, 0, 0)
-        chat_col.setSpacing(4)
-        chat_col.addWidget(label("Chat ID", "label"))
-        self._chat_id_input = QLineEdit()
-        self._chat_id_input.setPlaceholderText("e.g. 123456789 or @channel")
+        chat_row = SettingRow("Chat ID", "Your user ID, or @channel.")
+        self._chat_id_input = _input("e.g. 123456789", 300)
         self._chat_id_input.textChanged.connect(self._on_notification_fields_changed)
-        chat_col.addWidget(self._chat_id_input)
-        fields_row.addLayout(chat_col, 2)
+        chat_row.add(self._chat_id_input)
+        telegram.add_row(chat_row)
 
-        card.add_layout(fields_row)
-
-        options_row = QHBoxLayout()
-        options_row.setContentsMargins(0, 0, 0, 0)
-        options_row.setSpacing(8)
-
-        self._idle_switch = Switch()
-        self._idle_switch.toggled.connect(self._set_notify_on_idle)
-        options_row.addWidget(self._idle_switch)
-        options_row.addWidget(label("Auto-notify after inactivity (seconds):", "muted"))
-
-        self._idle_timeout_input = QLineEdit()
-        self._idle_timeout_input.setFixedWidth(60)
-        self._idle_timeout_input.setPlaceholderText("60")
-        self._idle_timeout_input.textChanged.connect(self._on_notification_fields_changed)
-        options_row.addWidget(self._idle_timeout_input)
-        options_row.addStretch(1)
-
-        card.add_layout(options_row)
-
-        tool_row = QHBoxLayout()
-        tool_row.setContentsMargins(0, 0, 0, 0)
-        tool_row.setSpacing(8)
-
-        self._notify_tool_switch = Switch()
-        self._notify_tool_switch.toggled.connect(self._set_notify_tool_enabled)
-        tool_row.addWidget(self._notify_tool_switch)
-        tool_row.addWidget(label("Enable notify_user tool for agents to send custom notes", "muted"))
-        tool_row.addStretch(1)
-
-        card.add_layout(tool_row)
-        card.add(separator())
-
-        btn_row = QHBoxLayout()
-        btn_row.setContentsMargins(0, 0, 0, 0)
-        btn_row.setSpacing(8)
-
+        actions_row = SettingRow(
+            "Test message",
+            "Sends a short message with the values above. Save keeps them.",
+        )
+        self._test_notify_btn = button("Send test", "secondary")
+        self._test_notify_btn.clicked.connect(self._send_test_notification)
         self._save_notify_btn = button("Save", "default")
         self._save_notify_btn.setEnabled(False)
         self._save_notify_btn.clicked.connect(self._save_notification_settings)
+        actions_row.add(self._test_notify_btn)
+        actions_row.add(self._save_notify_btn)
+        telegram.add_row(actions_row)
+        page.add(telegram)
 
-        self._test_notify_btn = button("Send Test Message", "secondary")
-        self._test_notify_btn.clicked.connect(self._send_test_notification)
-
-        btn_row.addWidget(self._save_notify_btn)
-        btn_row.addWidget(self._test_notify_btn)
-        btn_row.addStretch(1)
-
-        card.add_layout(btn_row)
-
-        card.add(
-            label(
-                "Credentials can also be provided via TELEGRAM_BOT_TOKEN and "
-                "TELEGRAM_CHAT_ID in your environment or .env file.",
-                "muted",
-            )
+        when = Group("When to notify")
+        idle_row = SettingRow(
+            "After a quiet spell",
+            "Notify when no tool has been called for this many seconds.",
         )
-        return card
+        self._idle_timeout_input = _input("60", 64)
+        self._idle_timeout_input.setAlignment(Qt.AlignRight)
+        self._idle_timeout_input.textChanged.connect(self._on_notification_fields_changed)
+        self._idle_switch = Switch()
+        self._idle_switch.toggled.connect(self._set_notify_on_idle)
+        idle_row.add(self._idle_timeout_input)
+        idle_row.add(label("s", "caption"))
+        idle_row.add(self._idle_switch)
+        when.add_row(idle_row)
 
-    def _logs_card(self) -> Card:
-        card = Card("Activity", "Live output from the servers and the tunnel.")
+        tool_row = SettingRow(
+            "notify_user tool",
+            "Let agents send you a short note themselves.",
+        )
+        self._notify_tool_switch = Switch()
+        self._notify_tool_switch.toggled.connect(self._set_notify_tool_enabled)
+        tool_row.add(self._notify_tool_switch)
+        when.add_row(tool_row)
+        page.add(when)
+
+        page.finish()
+        return page
+
+    def _activity_page(self) -> Page:
+        page = Page("Activity", "Live output from the servers and the tunnel.", scroll=False)
+        self._log_filter_control = Segmented(list(LOG_FILTERS), "all")
+        self._log_filter_control.changed.connect(self._set_log_filter)
+        page.header_extra(self._log_filter_control)
+        clear = button("Clear", "ghost")
+        clear.clicked.connect(self._clear_logs)
+        page.header_extra(clear)
+
         self._log_view = QPlainTextEdit()
         self._log_view.setObjectName("logView")
         self._log_view.setReadOnly(True)
         self._log_view.setMaximumBlockCount(2000)
-        self._log_view.setMinimumHeight(190)
         self._log_view.setFocusPolicy(Qt.ClickFocus)
-        card.add(self._log_view)
+        self._log_view.setLineWrapMode(QPlainTextEdit.NoWrap)
 
-        clear = button("Clear", "secondary")
-        clear.clicked.connect(self._clear_logs)
-        card.add(self._controls(clear, align_right=True))
-        return card
+        holder = Group()
+        holder.add_row(self._log_view, 1)
+        page.add(holder, 1)
+        return page
 
     # --- actions ---------------------------------------------------------
 
@@ -552,11 +575,30 @@ class MainWindow(QMainWindow):
         self._refresh_status()
         self._check_health()
 
+    def _toggle_servers(self) -> None:
+        if self._supervisor.running:
+            self._stop_servers()
+        else:
+            self._start_servers()
+
     def _restart_servers(self) -> None:
         self._supervisor.stop()
         self._supervisor.start()
         QTimer.singleShot(400, self._refresh_status)
         QTimer.singleShot(600, self._check_health)
+
+    def _toggle_tunnel(self) -> None:
+        if tunnel.status().get("running"):
+            self._stop_tunnel()
+        else:
+            self._start_tunnel()
+
+    def _open_active_folder(self) -> None:
+        try:
+            active = projects.active_project()
+        except projects.ProjectError:
+            return
+        QDesktopServices.openUrl(QUrl.fromLocalFile(active["root"]))
 
     # --- the whole stack at once -----------------------------------------
 
@@ -716,9 +758,9 @@ class MainWindow(QMainWindow):
 
         if new_domain:
             files_h, term_h = tunnel.compute_hostnames(new_domain, new_user)
-            self._tunnel_preview.setText(f"Preview: {files_h}  |  {term_h}")
+            self._hostnames_row.set_description(files_h + "  \u00b7  " + term_h)
         else:
-            self._tunnel_preview.setText("Base domain cannot be empty.")
+            self._hostnames_row.set_description("Base domain cannot be empty.")
 
     def _apply_tunnel_settings(self) -> None:
         new_domain = self._domain_input.text().strip().lower().lstrip(".").rstrip("/")
@@ -828,10 +870,6 @@ class MainWindow(QMainWindow):
         if confirm == QMessageBox.Yes:
             self._activate(project["id"])
 
-    def _selected_project_id(self) -> str:
-        item = self._project_list.currentItem()
-        return item.data(Qt.UserRole) if item else ""
-
     def _activate(self, project_id: str) -> None:
         try:
             projects.set_active_project(project_id)
@@ -840,19 +878,11 @@ class MainWindow(QMainWindow):
             return
         self.refresh()
 
-    def _activate_selected(self) -> None:
-        project_id = self._selected_project_id()
-        if project_id:
-            self._activate(project_id)
-
-    def _remove_selected(self) -> None:
-        project_id = self._selected_project_id()
-        if not project_id:
-            return
+    def _remove_project(self, project_id: str, name: str) -> None:
         confirm = QMessageBox.question(
             self,
             "Remove project",
-            "Remove this project from the list? The folder itself stays on disk.",
+            "Remove '" + name + "' from the list? The folder itself stays on disk.",
         )
         if confirm != QMessageBox.Yes:
             return
@@ -878,7 +908,18 @@ class MainWindow(QMainWindow):
 
     def _clear_logs(self) -> None:
         logs.clear()
+        self._records.clear()
         self._log_view.clear()
+
+    def _set_log_filter(self, key: str) -> None:
+        self._log_filter = key
+        self._log_view.clear()
+        for record in self._records:
+            if self._log_matches(record):
+                self._log_view.appendHtml(self._log_line(record))
+        self._log_view.verticalScrollBar().setValue(
+            self._log_view.verticalScrollBar().maximum()
+        )
 
     def _open_guide(self) -> None:
         SetupGuideDialog(self).exec()
@@ -933,9 +974,36 @@ class MainWindow(QMainWindow):
 
     # --- rendering -------------------------------------------------------
 
+    def _log_matches(self, record: dict) -> bool:
+        if self._log_filter == "calls":
+            return record.get("kind") == "call"
+        if self._log_filter == "problems":
+            return record.get("level") in ("warn", "error")
+        return True
+
+    @staticmethod
+    def _log_line(record: dict) -> str:
+        """One coloured line: time, source, message."""
+        stamp = time.strftime("%H:%M:%S", time.localtime(record.get("time", time.time())))
+        source = html.escape(str(record.get("source", "")))
+        message = html.escape(str(record.get("message", ""))).replace("\n", "<br>")
+        level = record.get("level", "info")
+        colour = {
+            "warn": COLORS["warning_text"],
+            "error": COLORS["danger_text"],
+            "debug": COLORS["faint"],
+        }.get(level, COLORS["text"] if record.get("kind") == "call" else COLORS["text_2"])
+        pad = "&nbsp;" * max(2, 11 - len(source))
+        return (
+            '<span style="color:%s">%s</span>&nbsp;&nbsp;'
+            '<span style="color:%s">%s</span>%s'
+            '<span style="color:%s">%s</span>'
+        ) % (COLORS["faint"], stamp, COLORS["muted"], source, pad, colour, message)
+
     def _append_log(self, record: dict) -> None:
-        prefix = "[" + str(record.get("source", "")) + "] "
-        self._log_view.appendPlainText(prefix + str(record.get("message", "")))
+        self._records.append(record)
+        if self._log_matches(record):
+            self._log_view.appendHtml(self._log_line(record))
 
     def refresh(self) -> None:
         data = settings.all()
@@ -943,19 +1011,29 @@ class MainWindow(QMainWindow):
         path = servers["http_path"]
         host = servers["host"]
 
-        self._files_local.set_value(
-            "http://" + host + ":" + str(servers["files_port"]) + path
-        )
-        self._terminal_local.set_value(
-            "http://" + host + ":" + str(servers["terminal_port"]) + path
+        self._local_urls = {
+            "files": "http://" + host + ":" + str(servers["files_port"]) + path,
+            "terminal": "http://" + host + ":" + str(servers["terminal_port"]) + path,
+        }
+        self._servers_row.set_description(
+            "Files System :" + str(servers["files_port"]) + " and Terminal :"
+            + str(servers["terminal_port"]) + " on " + host
         )
 
         urls = tunnel.public_urls()
-        self._files_public.set_value(urls.get("files", "") or "(hostname not set)")
-        self._terminal_public.set_value(
-            urls.get("terminal", "") or "(hostname not set)"
-        )
+        self._public_urls = {
+            "files": urls.get("files", "") or "",
+            "terminal": urls.get("terminal", "") or "",
+        }
+        self._files_public.set_value(self._public_urls["files"] or "(hostname not set)")
+        self._terminal_public.set_value(self._public_urls["terminal"] or "(hostname not set)")
+        self._files_public.set_copyable(bool(self._public_urls["files"]))
+        self._terminal_public.set_copyable(bool(self._public_urls["terminal"]))
         self._tunnel_config.set_value(data["tunnel"]["config_file"] or "(not set)")
+        self._tunnel_config.set_copyable(bool(data["tunnel"]["config_file"]))
+        if not self._endpoint_mode_touched:
+            self._endpoint_mode.set_value("public" if self._public_urls["files"] else "local")
+        self._render_endpoints()
 
         tunnel_cfg = data.get("tunnel", {}) or {}
         curr_domain = str(tunnel_cfg.get("domain") or "wolroom.store")
@@ -974,9 +1052,15 @@ class MainWindow(QMainWindow):
             self._user_slug_input.blockSignals(False)
 
         files_h, term_h = tunnel.compute_hostnames(curr_domain, curr_user)
-        self._tunnel_preview.setText(f"Active hostnames: {files_h}  |  {term_h}")
+        if not self._apply_tunnel_btn.isEnabled():
+            self._hostnames_row.set_description(files_h + "  \u00b7  " + term_h)
+        configured, reason = tunnel.is_configured()
+        self._tunnel_row.set_description(
+            files_h + "  \u00b7  " + term_h if configured else reason
+        )
 
         self._token_field.set_value(data["auth"]["token"])
+        self._token_overview.set_value(data["auth"]["token"])
 
         # Signals are blocked while syncing: refresh() also runs as a
         # settings listener, and writing the value back would loop.
@@ -1041,58 +1125,104 @@ class MainWindow(QMainWindow):
 
     def _render_projects(self, data: dict) -> None:
         active_id = data.get("active_project_id")
-        selected = self._selected_project_id()
-
-        self._project_list.clear()
-        for project in data.get("projects", []):
+        group = self._projects_group
+        group.clear_rows()
+        items = data.get("projects", [])
+        for project in items:
             is_active = project["id"] == active_id
-            marker = "\u2713 " if is_active else ""
-            item = QListWidgetItem(marker + project["name"] + "\n" + project["root"])
-            item.setData(Qt.UserRole, project["id"])
-            self._project_list.addItem(item)
-            if project["id"] == selected:
-                self._project_list.setCurrentItem(item)
+            row = SettingRow(project["name"], project["root"], mono=True)
+            if is_active:
+                row.add(Badge("Active", "success"))
+            else:
+                activate = button("Set active", "secondary")
+                activate.clicked.connect(
+                    lambda _checked=False, pid=project["id"]: self._activate(pid)
+                )
+                row.add(activate)
+            remove = button("Remove", "ghost", "Remove from the list; the folder stays on disk")
+            remove.clicked.connect(
+                lambda _checked=False, pid=project["id"], name=project["name"]:
+                self._remove_project(pid, name)
+            )
+            row.add(remove)
+            group.add_row(row)
+        if not items:
+            empty = SettingRow("No projects yet", "Add a folder to give the tools a home.")
+            add = button("Add folder", "default")
+            add.clicked.connect(self._add_project)
+            empty.add(add)
+            group.add_row(empty)
 
         try:
             active = projects.active_project()
-            self._project_badge.set_state(active["name"], "success")
         except projects.ProjectError:
-            self._project_badge.set_state("None", "danger")
+            active = None
+        if active:
+            self._project_chip.name.setText(active["name"])
+            self._project_chip.path.setText(active["root"])
+            self._active_row.set_title(active["name"])
+            self._active_row.set_description(active["root"])
+        else:
+            self._project_chip.name.setText("None")
+            self._project_chip.path.setText("Pick a folder")
+            self._active_row.set_title("No active project")
+            self._active_row.set_description("Tools need a folder to work in.")
+
+    def _on_endpoint_mode(self, _key: str) -> None:
+        self._endpoint_mode_touched = True
+        self._render_endpoints()
+
+    def _render_endpoints(self) -> None:
+        """Fill the overview's endpoint rows with the public or local URLs."""
+        if not hasattr(self, "_local_urls"):
+            return
+        mode = self._endpoint_mode.value()
+        source = self._public_urls if mode == "public" else self._local_urls
+        for key, row in (("files", self._files_endpoint), ("terminal", self._terminal_endpoint)):
+            value = source.get(key) or ""
+            row.set_value(value or "Set a domain on the Tunnel page")
+            row.set_copyable(bool(value))
 
     def _refresh_status(self) -> None:
         running = self._supervisor.running
         self._servers_badge.set_state(
             "Running" if running else "Stopped", "success" if running else "danger"
         )
-        self._start_button.setEnabled(not running)
-        self._stop_button.setEnabled(running)
-        self._restart_button.setEnabled(running)
+        self._set_text(self._servers_toggle, "Stop" if running else "Start")
+        self._restart_button.setVisible(running)
 
         status = tunnel.status()
         tunnel_running = bool(status.get("running"))
-        self._tunnel_badge.set_state(
-            "Running" if tunnel_running else "Stopped",
-            "success" if tunnel_running else "danger",
+        for badge in (self._tunnel_badge, self._tunnel_page_badge):
+            badge.set_state(
+                "Running" if tunnel_running else "Stopped",
+                "success" if tunnel_running else "danger",
+            )
+        self._set_text(self._tunnel_toggle, "Stop" if tunnel_running else "Start")
+        self._set_text(
+            self._tunnel_page_toggle, "Stop tunnel" if tunnel_running else "Start tunnel"
         )
-        self._tunnel_start.setEnabled(not tunnel_running)
-        self._tunnel_stop.setEnabled(tunnel_running)
 
         self._sync_master(running or tunnel_running)
 
+    @staticmethod
+    def _set_text(widget, text: str) -> None:
+        if widget.text() != text:
+            widget.setText(text)
+
     def _sync_master(self, anything_running: bool) -> None:
-        """The title-bar button flips between starting and stopping.
+        """The sidebar button flips between starting and stopping.
 
         Style follows meaning: starting is the primary action, stopping is
         a quiet one, so it never becomes the brightest thing on screen.
         """
         text = "Stop everything" if anything_running else "Start everything"
         variant = "secondary" if anything_running else "default"
-        if self._master_button.text() != text:
-            self._master_button.setText(text)
+        self._set_text(self._master_button, text)
+        self._master_button.set_glyph("stop" if anything_running else "play")
         if self._master_button.property("variant") != variant:
             self._master_button.setProperty("variant", variant)
-            self._master_button.style().unpolish(self._master_button)
-            self._master_button.style().polish(self._master_button)
+            repolish(self._master_button)
 
     # --- lifecycle -------------------------------------------------------
 

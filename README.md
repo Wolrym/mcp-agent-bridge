@@ -37,9 +37,9 @@ tunnel is only needed for clients that run elsewhere.
    with the live log and any traceback. Shortcuts hold absolute paths, so
    run the script again after moving or renaming the folder.
    `start_gui.bat` and `python -m gui.app` still work too.
-4. In the **Cloudflare tunnel** card set the base domain and your user
-   prefix, point it at your cloudflared `config.yml`, then press
-   **Start everything**.
+4. On the **Tunnel** page set the base domain and your user prefix,
+   point it at your cloudflared `config.yml`, then press **Start
+   everything** at the top of the sidebar.
 5. Open **Setup guide**: it has the endpoint URLs, the token, a config
    snippet and a ready-made "connect an MCP server" request to copy.
 
@@ -145,8 +145,8 @@ replaced with defaults. Useful keys:
 
 ## Logs
 
-The panel's Activity card shows one line per tool call (tool, key
-arguments, duration, error). The same lines go to `logs/bridge.log`
+The panel's Activity page shows one line per tool call (tool, key
+arguments, duration, error); the Calls and Problems filters narrow it down. The same lines go to `logs/bridge.log`
 (rotated at about 1 MB), so a panel started without a console can still
 be diagnosed.
 

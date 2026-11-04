@@ -12,7 +12,7 @@ how you end up with a pink square instead of a maximise icon.
 
 Usage:
 
-    chrome = install_frameless(window, "MCP Control Panel")
+    chrome = install_frameless(window, "MCP Agent Bridge")
     layout.addWidget(chrome.title_bar)
 """
 from __future__ import annotations
@@ -27,15 +27,17 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from gui.widgets.tokens import COLORS
+
 GRIP = 6           # thickness of the invisible resize strips, in pixels
 BAR_HEIGHT = 40
 ICON_SIZE = 18
 
-# Palette, kept in sync with theme.qss.
-ICON = QColor("#a1a1aa")
-ICON_HOVER = QColor("#fafafa")
-HOVER_BG = QColor("#1f1f23")
-CLOSE_BG = QColor("#b91c1c")
+# Colours come from the shared tokens, like theme.qss.
+ICON = QColor(COLORS["muted"])
+ICON_HOVER = QColor(COLORS["text_strong"])
+HOVER_BG = QColor(COLORS["selected"])
+CLOSE_BG = QColor("#c42b1c")  # the Windows close-button red
 
 _EDGES = (
     (Qt.LeftEdge, Qt.SizeHorCursor),

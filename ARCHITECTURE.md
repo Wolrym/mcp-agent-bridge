@@ -39,8 +39,9 @@ servers/
 gui/
   app.py                    QApplication bootstrap: theme, log sinks, single instance
   main_window.py            panel layout and every action
-  theme.qss                 stylesheet
-  widgets/                  primitives, frameless chrome, setup guide
+  theme.qss                 stylesheet; colours are @tokens
+  widgets/                  tokens (colours), icons, primitives, frameless
+                            chrome, setup guide
 skills/mcp-coding-agent/    the original skill (kept as it was)
 skills/mcp-coding-agent-v2/ the same skill, updated for the current tools
 skills/<group>/             third-party skills, local only (gitignored)
@@ -176,10 +177,18 @@ agent with error 1010, so the probe sends a browser-like one.
 
 ### GUI
 
-PySide6 with a frameless custom title bar. Cards for servers, tunnel,
-projects, connection details and the live log, plus a setup guide window
-with URLs, token, a config snippet and the skill texts. `gui.autostart`
-brings everything up as soon as the panel opens.
+PySide6 with a frameless custom title bar (app icon, readiness pill) over
+a sidebar and a content panel. The sidebar holds "Start everything", the
+pages (Overview, Projects, Tunnel, Security, Notifications, Activity;
+Ctrl+1..6) and the active project. Pages are settings-style groups of
+rows. The setup guide window uses the same layout and has the URLs, the
+token, a config snippet and the skill texts. `gui.autostart` brings
+everything up as soon as the panel opens.
+
+Colours live in `gui/widgets/tokens.py`; theme.qss refers to them as
+`@name` and painted widgets (switches, icons, the glow) read them
+directly. Controls have a brighter top edge than bottom; the orange of
+the icon is only an accent (selected page, focus ring).
 
 ## Tests
 

@@ -54,16 +54,21 @@ def main() -> int:
     # --- master button ---------------------------------------------------
     master = window._master_button
     check("master button label", master.text() == "Start everything", master.text())
-    check("master button is compact", master.objectName() == "titleAction")
+    check("master button is the sidebar action", master.objectName() == "masterAction")
     check(
-        "master button sits in the title bar",
-        window._chrome.title_bar.isAncestorOf(master),
+        "master button is not in the title bar",
+        not window._chrome.title_bar.isAncestorOf(master),
+    )
+    check(
+        "health pill sits in the title bar",
+        window._chrome.title_bar.isAncestorOf(window._health_pill),
     )
     check("master starts as primary", master.property("variant") == "default")
 
     window._sync_master(True)
     check("label flips when running", master.text() == "Stop everything", master.text())
     check("stop is quiet", master.property("variant") == "secondary")
+    check("icon flips to stop", master._glyph == "stop")
     window._sync_master(False)
     check("label flips back", master.text() == "Start everything")
 
@@ -84,19 +89,43 @@ def main() -> int:
         bool(settings.get("gui", "autostart", default=False)) == original,
     )
 
+    # --- pages -----------------------------------------------------------
+    from gui.main_window import PAGES
+
+    for key, _text, _icon in PAGES:
+        window.show_page(key)
+        check("page " + key + " opens", window.current_page() == key)
+        check("nav follows " + key, window._nav_buttons[key].isChecked())
+    window.show_page("overview")
+
+    # --- endpoints and the log filter -------------------------------------
+    window._endpoint_mode.set_value("local")
+    window._on_endpoint_mode("local")
+    check(
+        "local endpoints shown",
+        window._files_endpoint.value().startswith("http://127.0.0.1"),
+        window._files_endpoint.value(),
+    )
+    window._log_filter_control.set_value("problems")
+    window._set_log_filter("problems")
+    from core import logs
+    logs.log("test", "quiet line")
+    logs.log("test", "loud line", level="warn")
+    text = window._log_view.toPlainText()
+    check("problems filter hides info", "quiet line" not in text and "loud line" in text)
+    window._set_log_filter("all")
+    check("all shows everything again", "quiet line" in window._log_view.toPlainText())
+
     # --- corner fix ------------------------------------------------------
-    scroll = window._shell.findChildren(type(window._shell))
     from PySide6.QtWidgets import QScrollArea
 
     areas = window.findChildren(QScrollArea)
-    check("the panel has a scroll area", len(areas) == 1, str(len(areas)))
-    if areas:
-        check(
-            "viewport does not fill itself",
-            areas[0].viewport().autoFillBackground() is False,
-        )
+    check("pages scroll", len(areas) >= 5, str(len(areas)))
+    check(
+        "no viewport fills itself",
+        all(area.viewport().autoFillBackground() is False for area in areas),
+    )
     check("shell is the rounded surface", window._shell.objectName() == "windowShell")
-    del scroll
 
     window.close()
 

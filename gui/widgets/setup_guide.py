@@ -5,8 +5,9 @@ the two endpoint URLs, the auth token, a config snippet, a ready-made
 request for chat-based assistants, and the skill texts. Every value has
 a copy button, because all of this ends up pasted into a client by hand.
 
-The dialog uses the same custom chrome as the main window, so it looks
-like part of the app rather than a Windows dialog.
+The dialog uses the same chrome and layout as the main window - a sidebar
+of pages next to the content panel - so it looks like part of the app
+rather than a Windows dialog.
 """
 from __future__ import annotations
 
@@ -15,12 +16,13 @@ from pathlib import Path
 from PySide6.QtCore import Qt, QUrl
 from PySide6.QtGui import QDesktopServices, QGuiApplication
 from PySide6.QtWidgets import (
+    QButtonGroup,
     QDialog,
     QHBoxLayout,
+    QLabel,
     QPlainTextEdit,
     QPushButton,
-    QScrollArea,
-    QTabWidget,
+    QStackedWidget,
     QVBoxLayout,
     QWidget,
 )
@@ -29,7 +31,18 @@ from core import skills as skills_module
 from core import tunnel
 from core.config import settings
 from gui.widgets.chrome import install_frameless
-from gui.widgets.primitives import Badge, Card, CopyField, button, label, separator
+from gui.widgets.primitives import (
+    Backdrop,
+    Card,
+    CopyRow,
+    Group,
+    NavButton,
+    Page,
+    SettingRow,
+    button,
+    label,
+    separator,
+)
 
 SKILL_NAME = "mcp-coding-agent"
 
@@ -56,30 +69,11 @@ CONFIG_SNIPPET = """{{
 }}"""
 
 
-def _page() -> tuple:
-    """Return (scroll area, vertical layout) for one guide tab.
-
-    Margins are symmetric: the scrollbar is always visible and lives in
-    the tab panel's own padding, so the content does not shift sideways
-    depending on whether a tab happens to scroll.
-    """
-    inner = QWidget()
-    layout = QVBoxLayout(inner)
-    layout.setContentsMargins(4, 4, 4, 4)
-    layout.setSpacing(14)
-
-    area = QScrollArea()
-    area.setWidgetResizable(True)
-    area.setFrameShape(QScrollArea.NoFrame)
-    area.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOn)
-    area.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
-    area.setWidget(inner)
-    # A scroll viewport is its own widget and fills itself with the palette
-    # colour unless told not to, which is what put a grey slab behind the
-    # cards. Here the cards are the only surfaces.
-    area.viewport().setAutoFillBackground(False)
-    inner.setAutoFillBackground(False)
-    return area, layout
+GUIDE_PAGES = (
+    ("Connect", "tunnel"),
+    ("Skills", "guide"),
+    ("Daily use", "activity"),
+)
 
 
 def _step(number: int, text: str) -> QWidget:
@@ -89,8 +83,9 @@ def _step(number: int, text: str) -> QWidget:
     layout.setContentsMargins(0, 0, 0, 0)
     layout.setSpacing(10)
 
-    badge = Badge(str(number), "neutral")
-    badge.setFixedWidth(26)
+    badge = QLabel(str(number))
+    badge.setProperty("variant", "stepNumber")
+    badge.setAlignment(Qt.AlignCenter)
     layout.addWidget(badge, 0, Qt.AlignTop)
 
     body = label(text, "step")
@@ -105,7 +100,7 @@ class SetupGuideDialog(QDialog):
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self.setModal(True)
-        self.resize(800, 760)
+        self.resize(940, 720)
         chrome = install_frameless(self, "Setup guide", show_maximize=False)
 
         outer = QVBoxLayout(self)
@@ -121,65 +116,76 @@ class SetupGuideDialog(QDialog):
         shell_layout.addWidget(chrome.title_bar)
         outer.addWidget(shell)
 
-        layout = QVBoxLayout()
-        layout.setContentsMargins(22, 18, 22, 18)
-        layout.setSpacing(14)
-        shell_layout.addLayout(layout, 1)
+        self._stack = QStackedWidget()
+        self._stack.addWidget(self._connection_tab())
+        self._stack.addWidget(self._skill_tab())
+        self._stack.addWidget(self._usage_tab())
 
-        header = QVBoxLayout()
-        header.setSpacing(3)
-        header.addWidget(label("Setup guide", "title"))
-        header.addWidget(
-            label(
-                "Everything needed to connect an MCP client to this machine. "
-                "Values update automatically when settings change.",
-                "subtitle",
-            )
-        )
-        layout.addLayout(header)
+        nav = QWidget()
+        nav.setObjectName("sidebar")
+        nav.setFixedWidth(190)
+        nav_layout = QVBoxLayout(nav)
+        nav_layout.setContentsMargins(10, 6, 10, 10)
+        nav_layout.setSpacing(2)
+        self._nav = QButtonGroup(self)
+        self._nav.setExclusive(True)
+        self._nav_buttons = []
+        for index, (text, icon) in enumerate(GUIDE_PAGES):
+            item = NavButton(text, icon)
+            item.clicked.connect(lambda _checked=False, i=index: self.show_page(i))
+            self._nav.addButton(item)
+            self._nav_buttons.append(item)
+            nav_layout.addWidget(item)
+        nav_layout.addStretch(1)
+        note = label("Values update by themselves when settings change.", "caption")
+        note.setContentsMargins(10, 0, 4, 0)
+        nav_layout.addWidget(note)
 
-        tabs = QTabWidget()
-        tabs.setDocumentMode(False)
-        tabs.addTab(self._connection_tab(), "1. Connect MCP")
-        tabs.addTab(self._skill_tab(), "2. Add the skill")
-        tabs.addTab(self._usage_tab(), "3. Daily use")
-        layout.addWidget(tabs, 1)
+        backdrop = Backdrop()
+        backdrop_layout = QVBoxLayout(backdrop)
+        backdrop_layout.setContentsMargins(1, 1, 1, 1)
+        backdrop_layout.addWidget(self._stack)
 
-        footer = QHBoxLayout()
-        footer.addStretch(1)
-        close_button = button("Close", "secondary")
-        close_button.clicked.connect(self.accept)
-        footer.addWidget(close_button)
-        layout.addLayout(footer)
+        body = QHBoxLayout()
+        body.setContentsMargins(0, 0, 8, 8)
+        body.setSpacing(0)
+        body.addWidget(nav)
+        body.addWidget(backdrop, 1)
+        shell_layout.addLayout(body, 1)
 
+        self.show_page(0)
         self.refresh()
         self._unsubscribe = settings.subscribe(lambda _snapshot: self.refresh())
+
+    def page_count(self) -> int:
+        return self._stack.count()
+
+    def show_page(self, index: int) -> None:
+        if 0 <= index < self._stack.count():
+            self._stack.setCurrentIndex(index)
+            self._nav_buttons[index].setChecked(True)
 
     # --- tabs ------------------------------------------------------------
 
     def _connection_tab(self) -> QWidget:
-        page, layout = _page()
+        page = Page(
+            "Connect a client",
+            "Everything an MCP client needs to reach this machine.",
+        )
 
-        endpoints = Card(
+        endpoints = Group(
             "Endpoints and token",
-            "Add both servers to your MCP client with this token.",
+            "The token stays the same across restarts. It only changes if you "
+            "regenerate it on the Security page - and then every client "
+            "connection needs the new one.",
         )
-        self._files_url = CopyField("Files System URL")
-        self._terminal_url = CopyField("Terminal URL")
-        self._token = CopyField("Auth token (Bearer)", secret=True)
-        endpoints.add(self._files_url)
-        endpoints.add(self._terminal_url)
-        endpoints.add(self._token)
-        endpoints.add(separator())
-        endpoints.add(
-            label(
-                "The token stays the same across restarts. It only changes if "
-                "you regenerate it on the main screen - and then every client "
-                "connection needs the new one.",
-                "muted",
-            )
-        )
-        layout.addWidget(endpoints)
+        self._files_url = CopyRow("Files System URL")
+        self._terminal_url = CopyRow("Terminal URL")
+        self._token = CopyRow("Auth token (Bearer)", secret=True)
+        endpoints.add_row(self._files_url)
+        endpoints.add_row(self._terminal_url)
+        endpoints.add_row(self._token)
+        page.add(endpoints)
 
         steps = Card(
             "How to add a connection",
@@ -189,9 +195,10 @@ class SetupGuideDialog(QDialog):
         steps.add(
             _step(
                 1,
-                "Press 'Start everything' in the title bar and wait for the "
-                "pill next to it to read 'Ready (public)'. Turn on autostart "
-                "on the main screen to skip this step in future.",
+                "Press 'Start everything' at the top of the sidebar and wait "
+                "for the pill in the title bar to read 'Ready (public)'. Turn "
+                "on 'Start with the panel' on the Overview page to skip this "
+                "step in future.",
             )
         )
         steps.add(
@@ -241,7 +248,7 @@ class SetupGuideDialog(QDialog):
             lambda: QGuiApplication.clipboard().setText(self._config_box.toPlainText())
         )
         steps.add(copy_config)
-        layout.addWidget(steps)
+        page.add(steps)
 
         multiuser = Card(
             "Multi-user and custom domains",
@@ -250,24 +257,24 @@ class SetupGuideDialog(QDialog):
         multiuser.add(
             label(
                 "Each user should set a unique User Prefix (e.g. 'dima', 'alex') "
-                "in the Tunnel card on the main screen. This gives each machine its "
+                "on the Tunnel page. This gives each machine its "
                 "own isolated endpoints (<user>-files.<domain> and <user>-term.<domain>).\n\n"
                 "Tip: In Cloudflare DNS, add a single Wildcard CNAME record (* -> your-tunnel.cfargotunnel.com) "
                 "to automatically route any prefix without manual DNS setup.",
                 "muted",
             )
         )
-        layout.addWidget(multiuser)
+        page.add(multiuser)
 
-        layout.addStretch(1)
+        page.finish()
         return page
 
     def _skill_tab(self) -> QWidget:
-        page, layout = _page()
+        page = Page("Skills", "Instructions that tell an agent how to work with these tools.")
 
         instructions = Card(
-            "Skills",
-            "Instructions that tell an agent how to work with these tools.",
+            "How agents get them",
+            "Loaded on demand, so they cost nothing until used.",
         )
         instructions.add(
             _step(
@@ -298,44 +305,28 @@ class SetupGuideDialog(QDialog):
                 "<name>/SKILL.md; agents see them with list_skills(project=...).",
             )
         )
-        layout.addWidget(instructions)
+        page.add(instructions)
 
-        header_row = QHBoxLayout()
-        header_row.setContentsMargins(0, 0, 0, 0)
-        header_row.setSpacing(8)
-
-        self._skills_count_label = label("Discovered skills", "label")
-        header_row.addWidget(self._skills_count_label, 1)
-
-        open_folder_btn = button("Open skills folder", "secondary")
+        self._skills_group = Group("Skills")
+        open_folder_btn = button("Open folder", "ghost")
         open_folder_btn.clicked.connect(self._open_skills_folder)
-        header_row.addWidget(open_folder_btn)
-
-        reload_btn = button("Reload skills", "secondary")
+        self._skills_group.header_extra(open_folder_btn)
+        reload_btn = button("Reload", "ghost")
         reload_btn.clicked.connect(self._load_skills)
-        header_row.addWidget(reload_btn)
+        self._skills_group.header_extra(reload_btn)
+        page.add(self._skills_group)
 
-        layout.addLayout(header_row)
-
-        self._skills_list_layout = QVBoxLayout()
-        self._skills_list_layout.setContentsMargins(0, 0, 0, 0)
-        self._skills_list_layout.setSpacing(10)
-        layout.addLayout(self._skills_list_layout)
-
-        layout.addStretch(1)
+        page.finish()
         return page
 
     def _usage_tab(self) -> QWidget:
-        page, layout = _page()
+        page = Page("Daily use", "Small habits that keep sessions predictable.")
 
-        habits = Card(
-            "Working day to day",
-            "Small habits that keep sessions predictable.",
-        )
+        habits = Card("Working day to day")
         habits.add(
             _step(
                 1,
-                "Pick the project on the main screen before starting a chat. "
+                "Pick the project on the Projects page before starting a chat. "
                 "It is the default for relative paths; agents should still "
                 "use absolute paths.",
             )
@@ -362,14 +353,14 @@ class SetupGuideDialog(QDialog):
                 "just start the app again.",
             )
         )
-        layout.addWidget(habits)
+        page.add(habits)
 
         trouble = Card("If something breaks", "The usual suspects, in order.")
         trouble.add(
             _step(
                 1,
-                "A client cannot connect: check the badges here first. Nine "
-                "times out of ten the app simply is not running.",
+                "A client cannot connect: check the pill in the title bar "
+                "first. Nine times out of ten the app simply is not running.",
             )
         )
         trouble.add(
@@ -395,9 +386,9 @@ class SetupGuideDialog(QDialog):
                 "the ones configured here.",
             )
         )
-        layout.addWidget(trouble)
+        page.add(trouble)
 
-        layout.addStretch(1)
+        page.finish()
         return page
 
     # --- data ------------------------------------------------------------
@@ -434,45 +425,34 @@ class SetupGuideDialog(QDialog):
     def _load_skills(self) -> None:
         from PySide6.QtCore import QTimer
 
-        while self._skills_list_layout.count():
-            item = self._skills_list_layout.takeAt(0)
-            widget = item.widget()
-            if widget is not None:
-                widget.deleteLater()
+        group = self._skills_group
+        group.clear_rows()
 
         found = skills_module.discover()
-        # Grouped skills would bury the bridge's own under dozens of cards;
+        # Grouped skills would bury the bridge's own under dozens of rows;
         # they get one summary line instead.
-        all_skills = [s for s in found if not s.get("group")]
+        own = [s for s in found if not s.get("group")]
         groups: dict = {}
         for s in found:
             if s.get("group"):
                 groups[s["group"]] = groups.get(s["group"], 0) + 1
-        self._skills_count_label.setText(f"Skills ({len(all_skills)})")
+        group.set_title(f"Skills ({len(own)})")
         if groups:
             summary = ", ".join(f"{name}/ ({count})" for name, count in sorted(groups.items()))
-            self._skills_list_layout.addWidget(
-                label("Groups, loaded by agents on demand: " + summary, "muted")
-            )
+            group.set_caption("Groups, loaded by agents on demand: " + summary)
+        else:
+            group.set_caption("")
 
-        if not all_skills:
-            empty_card = Card(
+        if not own:
+            group.add_row(SettingRow(
                 "No skills found",
                 f"Place skill folders (each with a SKILL.md) in {skills_module.skills_root()}",
-            )
-            self._skills_list_layout.addWidget(empty_card)
+            ))
             return
 
-        for s in all_skills:
-            desc = s.get("description") or f"Skill slug: {s['slug']}"
-            card = Card(s["name"], desc)
-            card.header_extra(Badge(s["slug"], "neutral"))
-
-            btn_row = QHBoxLayout()
-            btn_row.setContentsMargins(0, 0, 0, 0)
-            btn_row.setSpacing(8)
-
-            copy_btn = button("Copy skill text", "default")
+        for s in own:
+            row = SettingRow(s["name"], s.get("description") or f"Skill slug: {s['slug']}")
+            copy_btn = button("Copy text", "secondary", "Copy SKILL.md to the clipboard")
             skill_file = s["file"]
 
             def make_copy_handler(path_to_file: str, btn: QPushButton):
@@ -480,30 +460,26 @@ class SetupGuideDialog(QDialog):
                     try:
                         content = Path(path_to_file).read_text(encoding="utf-8")
                         QGuiApplication.clipboard().setText(content)
-                        btn.setText("Copied!")
+                        btn.setText("Copied")
                         btn.setEnabled(False)
                         QTimer.singleShot(
                             1200,
-                            lambda: (btn.setText("Copy skill text"), btn.setEnabled(True)),
+                            lambda: (btn.setText("Copy text"), btn.setEnabled(True)),
                         )
                     except Exception:
                         btn.setText("Failed to read")
                 return handler
 
             copy_btn.clicked.connect(make_copy_handler(skill_file, copy_btn))
-            btn_row.addWidget(copy_btn)
-
-            open_file_btn = button("Open file", "secondary")
+            open_file_btn = button("Open", "ghost")
             open_file_btn.clicked.connect(
                 lambda _checked=False, f=skill_file: QDesktopServices.openUrl(
                     QUrl.fromLocalFile(f)
                 )
             )
-            btn_row.addWidget(open_file_btn)
-            btn_row.addStretch(1)
-
-            card.add_layout(btn_row)
-            self._skills_list_layout.addWidget(card)
+            row.add(open_file_btn)
+            row.add(copy_btn)
+            group.add_row(row)
 
     # --- lifecycle -------------------------------------------------------
 

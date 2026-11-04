@@ -25,6 +25,7 @@ from PySide6.QtWidgets import QApplication, QMessageBox  # noqa: E402
 from core import logs  # noqa: E402
 from core.config import PROJECT_ROOT, settings  # noqa: E402
 from gui.main_window import MainWindow  # noqa: E402
+from gui.widgets import tokens  # noqa: E402
 
 THEME_PATH = Path(__file__).resolve().parent / "theme.qss"
 LOG_DIR = PROJECT_ROOT / "logs"
@@ -103,8 +104,9 @@ def _single_instance() -> QLockFile | None:
 
 
 def _load_theme() -> str:
+    """The stylesheet, with its @colour names filled in from the tokens."""
     try:
-        return THEME_PATH.read_text(encoding="utf-8")
+        return tokens.apply(THEME_PATH.read_text(encoding="utf-8"))
     except OSError as exc:
         logs.log("gui", "Could not load theme: " + str(exc), level="warn")
         return ""
@@ -117,26 +119,27 @@ def _dark_palette() -> QPalette:
     picker, message boxes) partly paint from the palette, so without this
     they flash up light grey.
     """
-    background = QColor("#09090b")
-    surface = QColor("#101013")
-    text = QColor("#fafafa")
-    muted = QColor("#a1a1aa")
+    c = tokens.COLORS
+    background = QColor(c["shell"])
+    surface = QColor(c["btn_bottom"])
+    text = QColor(c["text"])
 
     palette = QPalette()
     palette.setColor(QPalette.Window, background)
     palette.setColor(QPalette.WindowText, text)
-    palette.setColor(QPalette.Base, QColor("#0c0c0f"))
+    palette.setColor(QPalette.Base, QColor(c["input"]))
     palette.setColor(QPalette.AlternateBase, surface)
     palette.setColor(QPalette.Text, text)
-    palette.setColor(QPalette.PlaceholderText, muted)
+    palette.setColor(QPalette.PlaceholderText, QColor(c["faint"]))
     palette.setColor(QPalette.Button, surface)
     palette.setColor(QPalette.ButtonText, text)
     palette.setColor(QPalette.ToolTipBase, surface)
     palette.setColor(QPalette.ToolTipText, text)
-    palette.setColor(QPalette.Highlight, QColor("#3f3f46"))
-    palette.setColor(QPalette.HighlightedText, text)
-    palette.setColor(QPalette.Disabled, QPalette.Text, QColor("#5b5b63"))
-    palette.setColor(QPalette.Disabled, QPalette.ButtonText, QColor("#5b5b63"))
+    palette.setColor(QPalette.Highlight, QColor(c["selection"]))
+    palette.setColor(QPalette.HighlightedText, QColor(c["text_strong"]))
+    palette.setColor(QPalette.Disabled, QPalette.Text, QColor(c["faint"]))
+    palette.setColor(QPalette.Disabled, QPalette.ButtonText, QColor(c["faint"]))
+    palette.setColor(QPalette.Link, QColor(c["text_strong"]))
     return palette
 
 

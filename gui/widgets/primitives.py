@@ -1,29 +1,54 @@
 """Small building blocks shared by every screen.
 
-These mirror the shadcn/ui vocabulary (Card, Badge, Button variants,
-Field) so the rest of the GUI reads declaratively instead of drowning in
-layout code.
+The vocabulary is deliberately small, so screens read declaratively:
 
-Only two button variants are used across the app - "default" for the one
-obvious action of a card and "secondary" for everything beside it, plus
-"destructive" for actions that throw work away. Keeping the vocabulary
-this small is what stops a row of buttons from looking accidental.
+  Page      a scrollable column with a title, a subtitle and groups
+  Group     a titled card of rows, with hairline dividers between them
+  SettingRow  title and description on the left, controls on the right
+  Badge     a status pill with a coloured dot
+  Switch, Segmented, GlyphButton, NavButton - the controls
+
+Buttons come in four variants: "default" (the one obvious action, light),
+"secondary" (everything beside it), "destructive" (throws work away) and
+"ghost" (quiet, text-only). Colours live in gui.widgets.tokens.
+
+Card, CopyField and CollapsibleCard are the older, field-style pieces;
+the setup guide still uses them.
 """
 from __future__ import annotations
 
-from PySide6.QtCore import QRectF, QSize, Qt
-from PySide6.QtGui import QColor, QGuiApplication, QPainter, QPen
+from PySide6.QtCore import QRectF, QSize, Qt, Signal
+from PySide6.QtGui import (
+    QColor,
+    QGuiApplication,
+    QPainter,
+    QPainterPath,
+    QPen,
+    QRadialGradient,
+)
 from PySide6.QtWidgets import (
     QAbstractButton,
+    QButtonGroup,
     QFrame,
     QHBoxLayout,
     QLabel,
     QLineEdit,
     QPushButton,
+    QScrollArea,
     QSizePolicy,
     QVBoxLayout,
     QWidget,
 )
+
+from gui.widgets.icons import draw_icon
+from gui.widgets.tokens import COLORS, GLOW_ALPHA, GLOW_RGB, TONE_DOT
+
+
+def repolish(widget: QWidget) -> None:
+    """Re-evaluate the stylesheet after a dynamic property change."""
+    widget.style().unpolish(widget)
+    widget.style().polish(widget)
+    widget.update()
 
 
 def label(text: str, variant: str = "") -> QLabel:
@@ -69,10 +94,16 @@ def row(*widgets: QWidget, spacing: int = 8, stretch_last: bool = False) -> QWid
 
 
 class Badge(QLabel):
-    """Status pill. Tone is one of: neutral, success, warning, danger."""
+    """Status pill. Tone is one of: neutral, success, warning, danger.
 
-    def __init__(self, text: str = "", tone: str = "neutral") -> None:
+    A small dot in the tone's colour leads the text, so the state reads at
+    a glance even where the pill itself is quiet.
+    """
+
+    def __init__(self, text: str = "", tone: str = "neutral", dot: bool = True) -> None:
         super().__init__(text)
+        self._dot = dot
+        self.setProperty("dot", "true" if dot else "false")
         self.setAlignment(Qt.AlignCenter)
         self.setSizePolicy(QSizePolicy.Maximum, QSizePolicy.Fixed)
         self.set_state(text, tone)
@@ -82,9 +113,18 @@ class Badge(QLabel):
             return
         self.setText(text)
         self.setProperty("badge", tone)
-        # Re-evaluate the stylesheet after a dynamic property change.
-        self.style().unpolish(self)
-        self.style().polish(self)
+        repolish(self)
+
+    def paintEvent(self, event) -> None:  # noqa: N802 - Qt naming
+        super().paintEvent(event)
+        if not self._dot:
+            return
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.Antialiasing, True)
+        painter.setPen(Qt.NoPen)
+        painter.setBrush(QColor(TONE_DOT.get(str(self.property("badge")), TONE_DOT["neutral"])))
+        size = 6.0
+        painter.drawEllipse(QRectF(9.0, (self.height() - size) / 2, size, size))
 
 
 class Switch(QAbstractButton):
@@ -96,13 +136,14 @@ class Switch(QAbstractButton):
     display scaling. `toggled(bool)` behaves like any checkable button.
     """
 
-    TRACK_ON = QColor("#e4e4e7")
-    TRACK_OFF = QColor("#232327")
-    TRACK_DISABLED = QColor("#18181b")
-    BORDER = QColor("#3f3f46")
-    KNOB_ON = QColor("#18181b")
-    KNOB_OFF = QColor("#a1a1aa")
-    KNOB_DISABLED = QColor("#5b5b63")
+    TRACK_ON = QColor(COLORS["prim_bottom"])
+    TRACK_OFF = QColor(COLORS["btn_bottom"])
+    TRACK_DISABLED = QColor(COLORS["btn_disabled"])
+    BORDER = QColor(COLORS["btn_edge"])
+    BORDER_HI = QColor(COLORS["btn_hi"])
+    KNOB_ON = QColor(COLORS["prim_text"])
+    KNOB_OFF = QColor(COLORS["muted"])
+    KNOB_DISABLED = QColor(COLORS["faint"])
 
     def __init__(self, checked: bool = False, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -110,10 +151,10 @@ class Switch(QAbstractButton):
         self.setChecked(checked)
         self.setCursor(Qt.PointingHandCursor)
         self.setFocusPolicy(Qt.ClickFocus)
-        self.setFixedSize(38, 22)
+        self.setFixedSize(36, 20)
 
     def sizeHint(self) -> QSize:  # noqa: N802 - Qt naming
-        return QSize(38, 22)
+        return QSize(36, 20)
 
     def paintEvent(self, event) -> None:  # noqa: N802 - Qt naming
         painter = QPainter(self)
@@ -131,8 +172,18 @@ class Switch(QAbstractButton):
         painter.setPen(QPen(self.BORDER, 1))
         painter.setBrush(fill)
         painter.drawRoundedRect(track, radius, radius)
+        if enabled and not on:
+            # The same light-from-above edge as the buttons: a brighter
+            # hairline along the top half of the track.
+            painter.save()
+            painter.setClipRect(QRectF(track.left(), track.top() - 1, track.width(), radius))
+            painter.setPen(QPen(self.BORDER_HI, 1))
+            painter.setBrush(Qt.NoBrush)
+            painter.drawRoundedRect(track, radius, radius)
+            painter.restore()
 
         diameter = track.height() - 6
+
         knob = QRectF(0, 0, diameter, diameter)
         knob.moveTop(track.center().y() - diameter / 2)
         knob.moveLeft(
@@ -314,7 +365,7 @@ class CollapsibleCard(QFrame):
 
         # Indicator
         self._arrow = QLabel("▾" if not collapsed else "▸")
-        self._arrow.setStyleSheet("color: #71717a; font-size: 13px; font-weight: bold;")
+        self._arrow.setStyleSheet("color: %s; font-size: 13px; font-weight: bold;" % COLORS["muted"])
         self._arrow.setFixedWidth(14)
         self._header.addWidget(self._arrow)
 
@@ -379,3 +430,425 @@ class CollapsibleCard(QFrame):
     def add_layout(self, layout) -> None:
         self._body.addLayout(layout)
 
+
+# --- layout pieces of the redesigned panel ---------------------------------
+
+
+class ElidedLabel(QLabel):
+    """One line of text that shortens itself (with ...) instead of
+    widening the window. The full text stays available as a tooltip.
+
+    Used for URLs and paths, which have no spaces to wrap at.
+    """
+
+    def __init__(self, text: str = "", variant: str = "", mode=Qt.ElideMiddle) -> None:
+        super().__init__()
+        self._full = ""
+        self._mode = mode
+        if variant:
+            self.setProperty("variant", variant)
+        self.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
+        self.setMinimumWidth(40)
+        self.setTextInteractionFlags(Qt.TextSelectableByMouse)
+        self.setText(text)
+
+    def setText(self, text: str) -> None:  # noqa: N802 - Qt naming
+        self._full = text or ""
+        self.setToolTip(self._full if len(self._full) > 40 else "")
+        self._elide()
+
+    def text(self) -> str:
+        return self._full
+
+    def resizeEvent(self, event) -> None:  # noqa: N802 - Qt naming
+        super().resizeEvent(event)
+        self._elide()
+
+    def _elide(self) -> None:
+        width = max(self.width() - 2, 10)
+        shown = self.fontMetrics().elidedText(self._full, self._mode, width)
+        QLabel.setText(self, shown)
+
+
+class GlyphButton(QPushButton):
+    """A button with a painted line icon before its text."""
+
+    def __init__(self, text: str, glyph: str, variant: str = "secondary",
+                 tooltip: str = "") -> None:
+        super().__init__(text)
+        self._glyph = glyph
+        self.setProperty("variant", variant)
+        self.setProperty("glyph", "true")
+        self.setCursor(Qt.PointingHandCursor)
+        self.setFocusPolicy(Qt.ClickFocus)
+        self.setAttribute(Qt.WA_Hover, True)
+        if tooltip:
+            self.setToolTip(tooltip)
+
+    def set_glyph(self, glyph: str) -> None:
+        if glyph != self._glyph:
+            self._glyph = glyph
+            self.update()
+
+    def glyph_colour(self) -> QColor:
+        if not self.isEnabled():
+            return QColor(COLORS["faint"])
+        if self.property("variant") == "default":
+            return QColor(COLORS["prim_text"])
+        return QColor(COLORS["text"] if self.underMouse() else COLORS["text_2"])
+
+    def paintEvent(self, event) -> None:  # noqa: N802 - Qt naming
+        super().paintEvent(event)
+        painter = QPainter(self)
+        size = 15.0
+        box = QRectF(12.0, (self.height() - size) / 2, size, size)
+        draw_icon(painter, self._glyph, box, self.glyph_colour())
+
+
+class NavButton(GlyphButton):
+    """A sidebar entry. The selected one gets the accent colour - on the
+    icon only, which is all the orange the main window needs."""
+
+    def __init__(self, text: str, glyph: str) -> None:
+        super().__init__(text, glyph, variant="nav")
+        self.setObjectName("navItem")
+        self.setCheckable(True)
+        self.setFocusPolicy(Qt.NoFocus)
+
+    def glyph_colour(self) -> QColor:
+        if self.isChecked():
+            return QColor(COLORS["accent"])
+        return QColor(COLORS["text"] if self.underMouse() else COLORS["muted"])
+
+
+class Segmented(QFrame):
+    """A row of mutually exclusive options in one pill (Default | Verbose)."""
+
+    changed = Signal(str)
+
+    def __init__(self, options: list, current: str = "") -> None:
+        super().__init__()
+        self.setObjectName("segmented")
+        self.setSizePolicy(QSizePolicy.Maximum, QSizePolicy.Fixed)
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(2, 2, 2, 2)
+        layout.setSpacing(2)
+        self._group = QButtonGroup(self)
+        self._group.setExclusive(True)
+        self._buttons: dict = {}
+        for key, text in options:
+            option = QPushButton(text)
+            option.setObjectName("segment")
+            option.setCheckable(True)
+            option.setCursor(Qt.PointingHandCursor)
+            option.setFocusPolicy(Qt.NoFocus)
+            option.clicked.connect(lambda _checked=False, k=key: self._pick(k))
+            self._group.addButton(option)
+            self._buttons[key] = option
+            layout.addWidget(option)
+        self.set_value(current or (options[0][0] if options else ""))
+
+    def value(self) -> str:
+        for key, option in self._buttons.items():
+            if option.isChecked():
+                return key
+        return ""
+
+    def set_value(self, key: str) -> None:
+        option = self._buttons.get(key)
+        if option is not None and not option.isChecked():
+            option.setChecked(True)
+
+    def _pick(self, key: str) -> None:
+        self.changed.emit(key)
+
+
+class SettingRow(QWidget):
+    """One line of a group: what it is on the left, the controls on the right."""
+
+    def __init__(self, title: str, description: str = "", mono: bool = False) -> None:
+        super().__init__()
+        self.setObjectName("settingRow")
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(16, 11, 14, 11)
+        layout.setSpacing(16)
+
+        text = QVBoxLayout()
+        text.setContentsMargins(0, 0, 0, 0)
+        text.setSpacing(2)
+        self._title = label(title, "rowTitle")
+        self._title.setWordWrap(False)
+        text.addWidget(self._title)
+        if mono:
+            self._description = ElidedLabel(description, "rowMono")
+        else:
+            self._description = label(description, "rowDescription")
+        self._description.setVisible(bool(description))
+        text.addWidget(self._description)
+        layout.addLayout(text, 1)
+
+        self._controls = QHBoxLayout()
+        self._controls.setContentsMargins(0, 0, 0, 0)
+        self._controls.setSpacing(8)
+        layout.addLayout(self._controls, 0)
+
+    def add(self, widget: QWidget) -> QWidget:
+        self._controls.addWidget(widget, 0, Qt.AlignVCenter)
+        return widget
+
+    def insert(self, index: int, widget: QWidget) -> QWidget:
+        self._controls.insertWidget(index, widget, 0, Qt.AlignVCenter)
+        return widget
+
+    def set_title(self, text: str) -> None:
+        self._title.setText(text)
+
+    def set_description(self, text: str) -> None:
+        self._description.setText(text)
+        self._description.setVisible(bool(text))
+
+    def description(self) -> str:
+        return self._description.text()
+
+
+class Group(QWidget):
+    """A titled card of rows, separated by hairlines."""
+
+    def __init__(self, title: str = "", caption: str = "") -> None:
+        super().__init__()
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(0, 0, 0, 0)
+        outer.setSpacing(8)
+
+        self._extras = QHBoxLayout()
+        self._extras.setContentsMargins(0, 0, 0, 0)
+        self._extras.setSpacing(8)
+        self._title_label = label(title, "groupTitle")
+        if title:
+            head = QHBoxLayout()
+            head.setContentsMargins(2, 0, 0, 0)
+            head.setSpacing(8)
+            head.addWidget(self._title_label, 1, Qt.AlignBottom)
+            head.addLayout(self._extras)
+            outer.addLayout(head)
+
+        self._card = QFrame()
+        self._card.setObjectName("group")
+        self._rows = QVBoxLayout(self._card)
+        self._rows.setContentsMargins(0, 0, 0, 0)
+        self._rows.setSpacing(0)
+        outer.addWidget(self._card, 1)
+
+        self._caption = label(caption, "caption")
+        self._caption.setContentsMargins(2, 0, 0, 0)
+        self._caption.setVisible(bool(caption))
+        outer.addWidget(self._caption)
+
+    def header_extra(self, widget: QWidget) -> QWidget:
+        self._extras.addWidget(widget, 0, Qt.AlignVCenter)
+        return widget
+
+    def set_title(self, text: str) -> None:
+        self._title_label.setText(text)
+
+    def add_row(self, row: QWidget, stretch: int = 0) -> QWidget:
+        if self._rows.count():
+            self._rows.addWidget(separator_line())
+        self._rows.addWidget(row, stretch)
+        return row
+
+    def clear_rows(self) -> None:
+        while self._rows.count():
+            item = self._rows.takeAt(0)
+            widget = item.widget()
+            if widget is not None:
+                widget.deleteLater()
+
+    def set_caption(self, text: str) -> None:
+        self._caption.setText(text)
+        self._caption.setVisible(bool(text))
+
+
+def separator_line() -> QFrame:
+    line = QFrame()
+    line.setObjectName("divider")
+    line.setFrameShape(QFrame.NoFrame)
+    return line
+
+
+class Page(QWidget):
+    """One screen of the main window: a header and a column of groups.
+
+    The column stops growing at a readable width and stays centred on
+    wide windows. `scroll=False` is for pages whose content scrolls by
+    itself (the activity log).
+    """
+
+    MAX_WIDTH = 880
+
+    def __init__(self, title: str, subtitle: str = "", scroll: bool = True) -> None:
+        super().__init__()
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(0, 0, 0, 0)
+        outer.setSpacing(0)
+
+        holder = QWidget()
+        centre = QHBoxLayout(holder)
+        centre.setContentsMargins(0, 0, 0, 0)
+        centre.setSpacing(0)
+        column = QWidget()
+        column.setMaximumWidth(self.MAX_WIDTH)
+        centre.addStretch(0)
+        centre.addWidget(column, 1)
+        centre.addStretch(0)
+
+        self._column = QVBoxLayout(column)
+        self._column.setContentsMargins(36, 28, 36, 32)
+        self._column.setSpacing(22)
+
+        head = QHBoxLayout()
+        head.setContentsMargins(0, 0, 0, 0)
+        head.setSpacing(10)
+        titles = QVBoxLayout()
+        titles.setContentsMargins(0, 0, 0, 0)
+        titles.setSpacing(4)
+        titles.addWidget(label(title, "pageTitle"))
+        self._subtitle = label(subtitle, "pageSubtitle")
+        self._subtitle.setVisible(bool(subtitle))
+        titles.addWidget(self._subtitle)
+        head.addLayout(titles, 1)
+        self._extras = QHBoxLayout()
+        self._extras.setContentsMargins(0, 0, 0, 0)
+        self._extras.setSpacing(8)
+        head.addLayout(self._extras)
+        self._column.addLayout(head)
+
+        if scroll:
+            area = QScrollArea()
+            area.setWidgetResizable(True)
+            area.setFrameShape(QScrollArea.NoFrame)
+            area.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+            area.setWidget(holder)
+            # A viewport fills itself from the palette unless told not to,
+            # which would paint a flat slab over the backdrop's glow.
+            area.viewport().setAutoFillBackground(False)
+            holder.setAutoFillBackground(False)
+            outer.addWidget(area)
+        else:
+            outer.addWidget(holder)
+
+    def header_extra(self, widget: QWidget) -> QWidget:
+        self._extras.addWidget(widget, 0, Qt.AlignTop)
+        return widget
+
+    def add(self, widget: QWidget, stretch: int = 0) -> QWidget:
+        self._column.addWidget(widget, stretch)
+        return widget
+
+    def add_layout(self, layout) -> None:
+        self._column.addLayout(layout)
+
+    def finish(self) -> None:
+        """Push the content to the top on tall windows."""
+        self._column.addStretch(1)
+
+    def set_subtitle(self, text: str) -> None:
+        self._subtitle.setText(text)
+        self._subtitle.setVisible(bool(text))
+
+
+class Backdrop(QWidget):
+    """The content panel: a rounded graphite surface with a faint cool
+    glow behind its top edge, the one bit of depth on the screen."""
+
+    RADIUS = 10.0
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.setObjectName("backdrop")
+        self.setAttribute(Qt.WA_StyledBackground, False)
+
+    def paintEvent(self, event) -> None:  # noqa: N802 - Qt naming
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.Antialiasing, True)
+        rect = QRectF(self.rect()).adjusted(0.5, 0.5, -0.5, -0.5)
+
+        painter.setPen(Qt.NoPen)
+        painter.setBrush(QColor(COLORS["panel"]))
+        painter.drawRoundedRect(rect, self.RADIUS, self.RADIUS)
+
+        painter.save()
+        outline = QPainterPath()
+        outline.addRoundedRect(rect, self.RADIUS, self.RADIUS)
+        painter.setClipPath(outline)
+        width = rect.width()
+        radius = min(max(width * 0.52, 320.0), 640.0)
+        painter.translate(rect.center().x(), rect.top() - radius * 0.12)
+        painter.scale(1.0, 0.5)
+        glow = QRadialGradient(0.0, 0.0, radius)
+        r, g, b = GLOW_RGB
+        glow.setColorAt(0.0, QColor(r, g, b, GLOW_ALPHA))
+        glow.setColorAt(0.45, QColor(r, g, b, int(GLOW_ALPHA * 0.45)))
+        glow.setColorAt(1.0, QColor(r, g, b, 0))
+        painter.setBrush(glow)
+        painter.drawEllipse(QRectF(-radius, -radius, 2 * radius, 2 * radius))
+        painter.restore()
+
+        painter.setPen(QPen(QColor(COLORS["panel_edge"]), 1))
+        painter.setBrush(Qt.NoBrush)
+        painter.drawRoundedRect(rect, self.RADIUS, self.RADIUS)
+
+
+class CopyRow(SettingRow):
+    """A row that shows a value (a URL, a path, the token) with a Copy
+    button; `secret=True` masks it behind Show/Hide."""
+
+    def __init__(self, title: str, value: str = "", secret: bool = False) -> None:
+        super().__init__(title, value or " ", mono=True)
+        self._secret = secret
+        self._revealed = not secret
+        self._value = ""
+        self._reveal_button = None
+        if secret:
+            self._reveal_button = button("Show", "secondary", "Show or hide the value")
+            self._reveal_button.clicked.connect(self._toggle_reveal)
+            self.add(self._reveal_button)
+        self._copy_button = button("Copy", "secondary")
+        self._copy_button.clicked.connect(self._copy)
+        self.add(self._copy_button)
+        self.set_value(value)
+
+    def value(self) -> str:
+        return self._value
+
+    def set_value(self, value: str) -> None:
+        self._value = value or ""
+        self._render()
+
+    def set_copyable(self, enabled: bool) -> None:
+        self._copy_button.setEnabled(enabled)
+
+    def _render(self) -> None:
+        if self._secret and not self._revealed:
+            shown = "\u2022" * min(len(self._value), 32)
+        else:
+            shown = self._value
+        self.set_description(shown or " ")
+
+    def _toggle_reveal(self) -> None:
+        self._revealed = not self._revealed
+        self._reveal_button.setText("Hide" if self._revealed else "Show")
+        self._render()
+
+    def _copy(self) -> None:
+        from PySide6.QtCore import QTimer
+
+        QGuiApplication.clipboard().setText(self._value)
+        self._copy_button.setText("Copied")
+        self._copy_button.setEnabled(False)
+
+        def restore() -> None:
+            self._copy_button.setText("Copy")
+            self._copy_button.setEnabled(True)
+
+        QTimer.singleShot(1200, restore)

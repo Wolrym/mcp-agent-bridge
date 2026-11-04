@@ -3,8 +3,9 @@
     python tools\\screenshot_gui.py [output folder]
 
 Uses a throwaway settings file (two sample projects, tunnel configured but
-off), starts nothing, and writes main.png, main-full.png and guide-*.png
-into the output folder (default: .mcp-runs\\shots).
+off), starts nothing, and writes main.png (the overview), main-<page>.png
+for every sidebar page, guide-*.png, plus small copies (titlebar.png,
+main-small.png) into the output folder (default: .mcp-runs\\shots).
 """
 from __future__ import annotations
 
@@ -41,11 +42,11 @@ os.environ["MCP_SETTINGS_PATH"] = str(_temp / "settings.json")
 
 from PySide6.QtCore import QTimer  # noqa: E402
 from PySide6.QtGui import QFont  # noqa: E402
-from PySide6.QtWidgets import QApplication, QScrollArea, QTabWidget  # noqa: E402
+from PySide6.QtWidgets import QApplication  # noqa: E402
 
 from core import logs  # noqa: E402
 from gui import app as gui_app  # noqa: E402
-from gui.main_window import MainWindow  # noqa: E402
+from gui.main_window import PAGES, MainWindow  # noqa: E402
 
 
 def main(argv: list) -> int:
@@ -65,28 +66,29 @@ def main(argv: list) -> int:
         logs.log("files" if "read" in text else "terminal", text, level=level, kind="call")
 
     window = MainWindow()
-    window.resize(1180, 860)
+    window.resize(1120, 780)
     window.show()
 
     def shoot() -> None:
+        # One picture per sidebar page; main.png is the overview.
+        for key in [k for k, _t, _i in PAGES]:
+            window.show_page(key)
+            qt.processEvents()
+            window.grab().save(str(out / f"main-{key}.png"))
+        window.show_page("overview")
+        qt.processEvents()
         shot = window.grab()
         shot.save(str(out / "main.png"))
         # Small copies: some clients pass images to the model as base64
         # text, so the full-size PNG is expensive to look at.
         shot.copy(0, 0, 640, 56).save(str(out / "titlebar.png"))
         shot.scaledToWidth(640).save(str(out / "main-small.png"))
-        areas = window.findChildren(QScrollArea)
-        if areas:
-            inner = areas[0].widget()
-            inner.grab().save(str(out / "main-full.png"))
         try:
             from gui.widgets.setup_guide import SetupGuideDialog
             guide = SetupGuideDialog(window)
             guide.show()
-            tabs = guide.findChild(QTabWidget)
-            for index in range(tabs.count() if tabs else 1):
-                if tabs:
-                    tabs.setCurrentIndex(index)
+            for index in range(guide.page_count()):
+                guide.show_page(index)
                 qt.processEvents()
                 guide.grab().save(str(out / f"guide-{index + 1}.png"))
             guide.close()

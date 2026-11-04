@@ -1,41 +1,40 @@
 /*
- * Dark theme in the spirit of shadcn/ui (zinc palette).
+ * MCP Agent Bridge - dark graphite theme.
  *
- * Two rules keep the whole file predictable:
+ * Colours are written as @name and filled in from gui/widgets/tokens.py
+ * when the sheet loads, so painted widgets and this file never drift
+ * apart. Three rules keep the file predictable:
  *   1. Only surfaces set a background. Plain containers stay transparent,
- *      so nothing paints a dark rectangle over a card or over the window
+ *      so nothing paints a flat slab over a card, the glow or the window
  *      border.
- *   2. Every interactive variant defines its own disabled look, so a
- *      disabled button dims instead of falling back to the Fusion default
- *      (which is what made the Start buttons look black).
- *
- * Palette: bg #09090b  card #101013  border #27272a  muted #a1a1aa
- *          fg #fafafa   accent #e4e4e7  danger #b91c1c
+ *   2. Controls catch the light from above: the top border is brighter
+ *      than the bottom one.
+ *   3. Every interactive variant defines its own disabled look, so a
+ *      disabled control dims instead of falling back to Fusion's default.
  */
 
 /* --- base ------------------------------------------------------------ */
 
 QWidget {
-    color: #fafafa;
+    color: @text;
     font-family: "Segoe UI", "Inter", sans-serif;
     font-size: 13px;
 }
 
-/* Our frameless windows paint their surface through #windowShell, so the
- * window widget itself must stay transparent - its square background
- * would otherwise show through the shell's rounded corners. Native
- * dialogs keep a solid page background, since they have no shell. */
+/* Frameless windows paint their surface through #windowShell, so the
+ * window widget itself stays transparent behind the rounded corners.
+ * Native dialogs keep a solid page background, since they have no shell. */
 QMainWindow, QDialog {
     background: transparent;
 }
 
 QMessageBox, QFileDialog {
-    background-color: #09090b;
+    background-color: @shell;
 }
 
 QWidget#windowShell {
-    background-color: #09090b;
-    border: 1px solid #27272a;
+    background-color: @shell;
+    border: 1px solid @edge;
     border-radius: 12px;
 }
 
@@ -45,245 +44,419 @@ QWidget#windowShell[maximized="true"] {
 }
 
 QToolTip {
-    background-color: #18181b;
-    color: #fafafa;
-    border: 1px solid #27272a;
+    background-color: @btn_top;
+    color: @text;
+    border: 1px solid @btn_edge;
     border-radius: 6px;
     padding: 4px 8px;
 }
 
 /* --- window chrome --------------------------------------------------- */
 
-/* Transparent, so the shell's rounded corners are not squared off. */
 QWidget#titleBar {
     background: transparent;
 }
 
 QLabel#titleDot {
-    background-color: #52525b;
+    background-color: @faint;
     border-radius: 4px;
 }
 
 QLabel#titleText {
-    color: #d4d4d8;
+    color: @text_2;
     font-size: 12px;
     font-weight: 600;
+}
+
+/* --- sidebar --------------------------------------------------------- */
+
+QWidget#sidebar {
+    background: transparent;
+}
+
+QLabel[variant="sidebarCaption"] {
+    color: @faint;
+    font-size: 11px;
+    font-weight: 600;
+    padding-left: 10px;
+}
+
+QPushButton#navItem {
+    background: transparent;
+    color: @text_2;
+    border: 1px solid transparent;
+    border-radius: 8px;
+    padding: 7px 10px 7px 36px;
+    text-align: left;
+    font-size: 13px;
+    font-weight: 400;
+    min-height: 16px;
+}
+
+QPushButton#navItem:hover {
+    background-color: @hover;
+    color: @text;
+}
+
+QPushButton#navItem:checked {
+    background-color: @selected;
+    border-top-color: @selected_hi;
+    color: @text_strong;
+}
+
+QFrame#projectChip {
+    background: transparent;
+    border: 1px solid @line;
+    border-top-color: @btn_edge;
+    border-radius: 10px;
+}
+
+QFrame#projectChip:hover {
+    background-color: @hover;
+}
+
+QLabel[variant="chipName"] {
+    color: @text;
+    font-size: 13px;
+    font-weight: 600;
+}
+
+QLabel[variant="chipPath"] {
+    color: @muted;
+    font-size: 11px;
 }
 
 /* --- typography ------------------------------------------------------ */
 
-QLabel[variant="title"] {
-    font-size: 19px;
+QLabel[variant="pageTitle"] {
+    font-size: 22px;
     font-weight: 600;
-    color: #fafafa;
+    color: @text_strong;
+}
+
+QLabel[variant="pageSubtitle"] {
+    font-size: 13px;
+    color: @muted;
+}
+
+QLabel[variant="groupTitle"] {
+    font-size: 13px;
+    font-weight: 600;
+    color: @text;
+}
+
+QLabel[variant="caption"] {
+    font-size: 12px;
+    color: @muted;
+}
+
+QLabel[variant="rowTitle"] {
+    font-size: 13px;
+    color: @text;
+}
+
+QLabel[variant="rowDescription"] {
+    font-size: 12px;
+    color: @muted;
+}
+
+QLabel[variant="rowMono"] {
+    font-family: "Cascadia Mono", "Consolas", monospace;
+    font-size: 12px;
+    color: @text_2;
+}
+
+QLabel[variant="title"] {
+    font-size: 20px;
+    font-weight: 600;
+    color: @text_strong;
 }
 
 QLabel[variant="subtitle"] {
-    font-size: 12px;
-    color: #a1a1aa;
+    font-size: 13px;
+    color: @muted;
 }
 
 QLabel[variant="cardTitle"] {
     font-size: 14px;
     font-weight: 600;
-    color: #fafafa;
+    color: @text;
 }
 
 QLabel[variant="cardDescription"] {
     font-size: 12px;
-    color: #a1a1aa;
+    color: @muted;
 }
 
 QLabel[variant="label"] {
     font-size: 11px;
     font-weight: 600;
-    color: #8b8b93;
+    color: @muted;
 }
 
 QLabel[variant="step"] {
     font-size: 12px;
-    color: #d4d4d8;
+    color: @text_2;
+}
+
+QLabel[variant="stepNumber"] {
+    background-color: @btn_bottom;
+    color: @text_2;
+    border: 1px solid @btn_edge;
+    border-top-color: @btn_hi;
+    border-radius: 11px;
+    font-size: 11px;
+    font-weight: 600;
+    min-width: 20px;
+    max-width: 20px;
+    min-height: 20px;
+    max-height: 20px;
 }
 
 QLabel[variant="muted"] {
     font-size: 12px;
-    color: #a1a1aa;
+    color: @muted;
 }
 
 QLabel[variant="mono"] {
     font-family: "Cascadia Mono", "Consolas", monospace;
-    color: #d4d4d8;
+    color: @text_2;
 }
 
-/* --- cards ----------------------------------------------------------- */
+/* --- surfaces -------------------------------------------------------- */
 
-QFrame#card {
-    background-color: #101013;
-    border: 1px solid #27272a;
+QFrame#group, QFrame#card {
+    background-color: @surface;
+    border: 1px solid @line;
     border-radius: 12px;
 }
 
+QFrame#divider {
+    background-color: @divider;
+    border: none;
+    max-height: 1px;
+    min-height: 1px;
+    margin: 0px 14px;
+}
+
 QFrame#separator {
-    background-color: #27272a;
+    background-color: @divider;
     border: none;
     max-height: 1px;
     min-height: 1px;
 }
 
 /* --- buttons ---------------------------------------------------------
- * Base rule doubles as the "secondary" look, so an unknown variant can
- * never fall through to an unstyled button.
+ * The base rule doubles as "secondary", so an unknown variant can never
+ * fall through to an unstyled button.
  */
 
 QPushButton {
-    background-color: #18181b;
-    color: #fafafa;
-    border: 1px solid #27272a;
+    background-color: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 @btn_top, stop:1 @btn_bottom);
+    color: @text;
+    border: 1px solid @btn_edge;
+    border-top-color: @btn_hi;
+    border-bottom-color: @btn_lo;
     border-radius: 8px;
-    padding: 7px 14px;
+    padding: 6px 13px;
     font-size: 12px;
     font-weight: 600;
     min-height: 16px;
 }
 
 QPushButton:hover {
-    background-color: #202024;
-    border-color: #34343a;
+    background-color: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 @btn_top_hover, stop:1 @btn_bottom_hover);
+    border-top-color: @btn_hi_hover;
 }
 
 QPushButton:pressed {
-    background-color: #16161a;
+    background-color: @btn_bottom;
+    border-top-color: @btn_edge;
 }
 
 QPushButton:disabled {
-    background-color: #131316;
-    border-color: #232327;
-    color: #5b5b63;
+    background-color: @btn_disabled;
+    border-color: @btn_disabled_edge;
+    color: @faint;
 }
 
-/* Compact variant for the title bar, so the master action does not
- * out-shout the window buttons next to it. */
-QPushButton#titleAction {
-    padding: 3px 12px;
-    font-size: 11px;
-    border-radius: 7px;
-    min-height: 14px;
+QPushButton[glyph="true"] {
+    padding-left: 34px;
+    text-align: left;
 }
 
 QPushButton[variant="default"] {
-    background-color: #e4e4e7;
-    color: #18181b;
-    border: 1px solid #e4e4e7;
+    background-color: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 @prim_top, stop:1 @prim_bottom);
+    color: @prim_text;
+    border: 1px solid @prim_edge;
+    border-top-color: @prim_hi;
+    border-bottom-color: @prim_lo;
 }
 
 QPushButton[variant="default"]:hover {
-    background-color: #fafafa;
-    border-color: #fafafa;
+    background-color: @prim_top;
 }
 
 QPushButton[variant="default"]:pressed {
-    background-color: #d4d4d8;
-    border-color: #d4d4d8;
+    background-color: @prim_bottom;
+    border-top-color: @prim_edge;
 }
 
-/* Dimmed, never black: a disabled primary stays a light chip. */
 QPushButton[variant="default"]:disabled {
-    background-color: #3f3f46;
-    border-color: #3f3f46;
-    color: #9b9ba3;
-}
-
-QPushButton[variant="secondary"] {
-    background-color: #18181b;
-    color: #fafafa;
-    border: 1px solid #27272a;
-}
-
-QPushButton[variant="secondary"]:hover {
-    background-color: #202024;
-    border-color: #34343a;
-}
-
-QPushButton[variant="secondary"]:disabled {
-    background-color: #131316;
-    border-color: #232327;
-    color: #5b5b63;
+    background-color: @prim_disabled;
+    border-color: @prim_disabled;
+    color: @prim_disabled_text;
 }
 
 QPushButton[variant="destructive"] {
-    background-color: #2a1416;
-    color: #fca5a5;
-    border: 1px solid #4c1d1d;
+    color: @danger_text;
 }
 
 QPushButton[variant="destructive"]:hover {
-    background-color: #3b1a1d;
-    border-color: #7f1d1d;
-    color: #fecaca;
+    background-color: @danger_hover;
+    border-color: @danger_edge;
+    border-top-color: @danger_edge;
 }
 
 QPushButton[variant="destructive"]:disabled {
-    background-color: #1b1113;
-    border-color: #2d1618;
-    color: #6b4145;
+    background-color: @btn_disabled;
+    border-color: @btn_disabled_edge;
+    color: @faint;
+}
+
+QPushButton[variant="ghost"] {
+    background: transparent;
+    border: 1px solid transparent;
+    color: @muted;
+}
+
+QPushButton[variant="ghost"]:hover {
+    background-color: @hover;
+    color: @text;
+}
+
+QPushButton[variant="ghost"]:disabled {
+    background: transparent;
+    color: @faint;
+}
+
+/* The master action at the top of the sidebar is a little taller. */
+QPushButton#masterAction {
+    padding-top: 8px;
+    padding-bottom: 8px;
+    font-size: 13px;
+}
+
+/* --- segmented control ------------------------------------------------ */
+
+QFrame#segmented {
+    background-color: @seg_bg;
+    border: 1px solid @line;
+    border-radius: 9px;
+}
+
+QPushButton#segment {
+    background: transparent;
+    border: 1px solid transparent;
+    border-radius: 7px;
+    padding: 3px 11px;
+    color: @muted;
+    font-size: 12px;
+    font-weight: 600;
+    min-height: 14px;
+}
+
+QPushButton#segment:hover {
+    color: @text;
+}
+
+QPushButton#segment:checked {
+    background-color: @seg_sel;
+    border-color: @btn_edge;
+    border-top-color: @seg_sel_hi;
+    color: @text_strong;
 }
 
 /* --- badges ---------------------------------------------------------- */
 
 QLabel[badge="neutral"] {
-    background-color: #1f1f23;
-    color: #a1a1aa;
-    border: 1px solid #2a2a30;
-    border-radius: 9px;
-    padding: 3px 10px;
+    background-color: @neutral_bg;
+    color: @neutral_text;
+    border: 1px solid @neutral_edge;
+    border-radius: 10px;
+    padding: 2px 10px 2px 10px;
     font-size: 11px;
     font-weight: 600;
 }
 
 QLabel[badge="success"] {
-    background-color: #0f2417;
-    color: #6ee7a8;
-    border: 1px solid #14532d;
-    border-radius: 9px;
-    padding: 3px 10px;
+    background-color: @success_bg;
+    color: @success_text;
+    border: 1px solid @success_edge;
+    border-radius: 10px;
+    padding: 2px 10px 2px 10px;
     font-size: 11px;
     font-weight: 600;
 }
 
 QLabel[badge="warning"] {
-    background-color: #2a2113;
-    color: #fcd34d;
-    border: 1px solid #4d3a12;
-    border-radius: 9px;
-    padding: 3px 10px;
+    background-color: @warning_bg;
+    color: @warning_text;
+    border: 1px solid @warning_edge;
+    border-radius: 10px;
+    padding: 2px 10px 2px 10px;
     font-size: 11px;
     font-weight: 600;
 }
 
 QLabel[badge="danger"] {
-    background-color: #2a1416;
-    color: #fca5a5;
-    border: 1px solid #4c1d1d;
-    border-radius: 9px;
-    padding: 3px 10px;
+    background-color: @danger_bg;
+    color: @danger_text;
+    border: 1px solid @danger_edge;
+    border-radius: 10px;
+    padding: 2px 10px 2px 10px;
     font-size: 11px;
     font-weight: 600;
+}
+
+/* Room for the painted status dot; after the tones so it wins. */
+QLabel[dot="true"] {
+    padding-left: 20px;
 }
 
 /* --- inputs ---------------------------------------------------------- */
 
 QLineEdit, QPlainTextEdit, QTextEdit {
-    background-color: #0c0c0f;
-    color: #e4e4e7;
-    border: 1px solid #27272a;
+    background-color: @input;
+    color: @text_2;
+    border: 1px solid @input_edge;
+    border-top-color: @input_hi;
+    border-bottom-color: @input_lo;
     border-radius: 8px;
-    padding: 6px 9px;
-    selection-background-color: #3f3f46;
-    selection-color: #fafafa;
+    padding: 6px 10px;
+    selection-background-color: @selection;
+    selection-color: @text_strong;
 }
 
+/* The one place the accent shows up besides the sidebar: where you type. */
 QLineEdit:focus, QPlainTextEdit:focus, QTextEdit:focus {
-    border-color: #52525b;
+    border-color: @accent_ring;
+}
+
+QLineEdit:read-only:focus, QPlainTextEdit:read-only:focus {
+    border-color: @input_edge;
+    border-top-color: @input_hi;
+    border-bottom-color: @input_lo;
+}
+
+QLineEdit {
+    font-family: "Cascadia Mono", "Consolas", monospace;
+    font-size: 12px;
+}
+
+QLineEdit:disabled {
+    color: @faint;
+    border-color: @btn_disabled_edge;
 }
 
 QPlainTextEdit, QTextEdit {
@@ -291,22 +464,19 @@ QPlainTextEdit, QTextEdit {
     font-size: 12px;
 }
 
-QLineEdit {
-    font-family: "Cascadia Mono", "Consolas", monospace;
-    font-size: 12px;
-    color: #c4c4cc;
-}
-
 QPlainTextEdit#logView {
-    background-color: #0a0a0c;
-    color: #b6b6bf;
+    background-color: @log;
+    color: @text_2;
+    border: none;
+    border-radius: 12px;
+    padding: 10px 12px;
 }
 
 /* --- lists ----------------------------------------------------------- */
 
 QListWidget {
-    background-color: #0c0c0f;
-    border: 1px solid #27272a;
+    background-color: @input;
+    border: 1px solid @input_edge;
     border-radius: 8px;
     padding: 4px;
     outline: none;
@@ -315,27 +485,24 @@ QListWidget {
 QListWidget::item {
     padding: 7px 9px;
     border-radius: 6px;
-    color: #d4d4d8;
+    color: @text_2;
 }
 
 QListWidget::item:hover {
-    background-color: #17171b;
+    background-color: @hover;
 }
 
 QListWidget::item:selected {
-    background-color: #232329;
-    color: #fafafa;
+    background-color: @selected;
+    color: @text_strong;
 }
 
-/* --- tabs ------------------------------------------------------------ */
+/* --- tabs (older screens) -------------------------------------------- */
 
-/* No surface of its own: the cards inside are the surfaces, and a panel
- * in the same colour behind them only flattened everything into one grey
- * slab. A hairline under the tabs is enough to group them. */
 QTabWidget::pane {
     background: transparent;
     border: none;
-    border-top: 1px solid #1f1f23;
+    border-top: 1px solid @divider;
     padding: 12px 2px 0px 0px;
 }
 
@@ -344,28 +511,27 @@ QTabBar {
     qproperty-drawBase: 0;
 }
 
-/* The bottom margin keeps the tabs off the panel edge. */
 QTabBar::tab {
-    background-color: #131316;
-    color: #a1a1aa;
-    border: 1px solid #27272a;
+    background: transparent;
+    color: @muted;
+    border: 1px solid transparent;
     border-radius: 8px;
-    padding: 7px 14px;
-    margin-right: 6px;
+    padding: 6px 13px;
+    margin-right: 4px;
     margin-bottom: 8px;
     font-size: 12px;
     font-weight: 600;
 }
 
 QTabBar::tab:hover {
-    background-color: #1b1b20;
-    color: #d4d4d8;
+    color: @text;
 }
 
 QTabBar::tab:selected {
-    background-color: #232329;
-    color: #fafafa;
-    border-color: #3f3f46;
+    background-color: @seg_sel;
+    color: @text_strong;
+    border-color: @btn_edge;
+    border-top-color: @seg_sel_hi;
 }
 
 /* --- scroll areas and bars ------------------------------------------- */
@@ -375,46 +541,48 @@ QScrollArea {
     border: none;
 }
 
-/* A scroll viewport is a separate widget that fills itself with the
- * palette colour. Left alone it painted a square slab over the window's
- * bottom-left corner (the bottom-right one was hidden behind the always
- * visible scrollbar, which is why only one corner looked wrong). */
+/* A scroll viewport fills itself with the palette colour; left alone it
+ * paints a square slab over the rounded corners and the glow. */
 QScrollArea > QWidget {
+    background: transparent;
+}
+
+QStackedWidget {
     background: transparent;
 }
 
 QScrollBar:vertical {
     background: transparent;
-    width: 12px;
+    width: 10px;
     margin: 0px;
 }
 
 QScrollBar::handle:vertical {
-    background-color: #2f2f36;
-    border-radius: 4px;
+    background-color: @btn_edge;
+    border-radius: 3px;
     min-height: 28px;
-    margin: 2px 3px 2px 3px;
+    margin: 2px 3px 2px 1px;
 }
 
 QScrollBar::handle:vertical:hover {
-    background-color: #3f3f46;
+    background-color: @btn_hi;
 }
 
 QScrollBar:horizontal {
     background: transparent;
-    height: 12px;
+    height: 10px;
     margin: 0px;
 }
 
 QScrollBar::handle:horizontal {
-    background-color: #2f2f36;
-    border-radius: 4px;
+    background-color: @btn_edge;
+    border-radius: 3px;
     min-width: 28px;
-    margin: 3px 2px 3px 2px;
+    margin: 1px 2px 3px 2px;
 }
 
 QScrollBar::handle:horizontal:hover {
-    background-color: #3f3f46;
+    background-color: @btn_hi;
 }
 
 QScrollBar::add-line, QScrollBar::sub-line {
