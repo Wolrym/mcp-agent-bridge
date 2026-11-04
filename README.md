@@ -1,181 +1,192 @@
-# Notion MCP Workspace (remake)
+# MCP Agent Bridge
 
-Two MCP servers for coding from Notion on this Windows machine, with token
-auth, live project switching and a Cloudflare Tunnel. Pure Python.
+Two MCP servers that give an AI agent real hands on this Windows machine -
+one for files, one for commands, background jobs and skills - with token
+auth, live project switching, an undo history and an optional Cloudflare
+Tunnel for remote clients. Pure Python, with a PySide6 control panel.
+
+> **Folder name.** On the author's PC the repository still lives in
+> `notion-mcp-agent-bridge_v2`; it will be renamed to `mcp-agent-bridge`
+> later. Nothing in the code depends on the folder name.
 
 See `ARCHITECTURE.md` for the design and the reasoning behind it.
 
-## Setup on a New Machine (Quickstart for Teammates)
+## Works with
 
-### 1. Prerequisites (Windows)
-1. **Python 3.10+**: Download from [python.org](https://www.python.org/downloads/) (make sure to check **"Add python.exe to PATH"**).
-2. **Cloudflare Tunnel CLI (`cloudflared`)**:
-   Open PowerShell and install via winget:
-   ```powershell
-   winget install Cloudflare.cloudflared
+Any MCP client that can reach a remote (streamable HTTP) server and send a
+Bearer token - for example Notion AI custom connections, Claude Code,
+Cursor or VS Code. A client on the same machine can use
+`http://127.0.0.1:9500/mcp` and `http://127.0.0.1:9501/mcp` directly; the
+tunnel is only needed for clients that run elsewhere.
+
+## Quick start (Windows)
+
+1. **Python 3.10+** from [python.org](https://www.python.org/downloads/)
+   (tick "Add python.exe to PATH"), then in the project folder:
+   ```cmd
+   pip install -r requirements.txt
    ```
-   *(Or download `cloudflared-windows-amd64.exe` from Cloudflare GitHub releases, rename to `cloudflared.exe`, and add to PATH).*
-
-### 2. Install Project Dependencies
-Open a terminal in the project folder:
-```cmd
-pip install -r requirements.txt
-```
-*(Optionally use a virtualenv: `python -m venv .venv && .venv\Scripts\activate && pip install -r requirements.txt`)*
-
-### 3. Sharing Project with Others (Clean Zip / Clone)
-If sharing as a `.zip` archive, **exclude these machine-specific files**:
-- `config/settings.json` (created automatically on first launch with clean defaults)
-- `__pycache__/`
-- `.mcp-runs/` and `.mcp-backups/`
-
-### 4. Run the Control Panel
-Double click `start_gui.bat` or run:
-```cmd
-python -m gui.app
-```
-On first start:
-1. In the **Cloudflare tunnel** card, set your **Base domain** (e.g. `wolroom.store`) and your unique **User prefix** (e.g. `alex`).
-2. Point cloudflared config to your tunnel credentials (`~/.cloudflared/config.yml`).
-3. Click **Start everything** in the top bar.
-4. Click **Notion setup guide** to copy endpoints and add skills directly into Notion.
+2. **cloudflared** (only for remote clients):
+   `winget install Cloudflare.cloudflared`
+3. Create the shortcuts once - nothing is built or installed:
+   ```cmd
+   python tools\make_shortcuts.py            :: add --desktop for desktop copies
+   ```
+   **MCP Agent Bridge** opens the panel without a console window (log in
+   `logs\bridge.log`); **MCP Agent Bridge (debug)** keeps a console open
+   with the live log and any traceback. Shortcuts hold absolute paths, so
+   run the script again after moving or renaming the folder.
+   `start_gui.bat` and `python -m gui.app` still work too.
+4. In the **Cloudflare tunnel** card set the base domain and your user
+   prefix, point it at your cloudflared `config.yml`, then press
+   **Start everything**.
+5. Open **Setup guide**: it has the endpoint URLs, the token, a config
+   snippet and a ready-made "connect an MCP server" request to copy.
 
 Headless:
 
-```
-python run_core.py                # servers + tunnel
-python run_core.py --no-tunnel    # local only
-python run_core.py --print-config # token, ports, projects, endpoints
+```cmd
+python run_core.py                 :: servers + tunnel
+python run_core.py --no-tunnel     :: local only
+python run_core.py --print-config  :: token, ports, projects, endpoints
 ```
 
 Settings-only commands (safer than editing the JSON by hand):
 
-```
-python run_core.py --set-tunnel-config "C:\Users\Dima\.cloudflared\config.yml"
-python run_core.py --files-hostname mcp-files.wolroom.store
-python run_core.py --terminal-hostname mcp-term.wolroom.store
+```cmd
+python run_core.py --set-tunnel-config "C:\Users\<you>\.cloudflared\config.yml"
+python run_core.py --domain example.com --user-slug alex
 python run_core.py --enable-tunnel
 python run_core.py --disable-tunnel
+python run_core.py --enable-backups
 python run_core.py --regenerate-token
 ```
 
-Settings live in `config\settings.json`, created on first run from the
-defaults. It holds the auth token, ports, tunnel setup, limits and the
-project registry. If the file ever becomes invalid JSON, it is moved aside
-as `settings.broken.json` and recreated from defaults - which is why hand
-editing is discouraged.
+Only one instance can hold the ports: do not run `run_core.py` and the
+control panel at the same time. A second panel refuses to start.
 
-Only one instance can hold the ports at a time: do not run `run_core.py`
-and the control panel simultaneously.
-
-## Control panel
-
-`gui/` is a PySide6 app styled after shadcn/ui (zinc palette, flat cards,
-subtle borders). It imports the same `ServerSupervisor` the CLI uses, so
-both entry points behave identically.
-
-- Servers card: status badge, start / stop / restart, local URLs with copy
-- Tunnel card: status badge, start / stop, public URLs, config file picker
-- Projects card: list, add folder, remove, set active
-- Authentication card: reveal / copy / regenerate the token
-- Activity card: live log from the servers and cloudflared
-- "Notion setup guide" button: a separate modal with the whole onboarding -
-  endpoint URLs, token, a ready-made "connect an MCP server" request, the
-  full skill text with a copy button, daily-use habits and troubleshooting
-
-## Test
-
-```
-python tests\smoke_test.py
-```
-
-Starts both servers on ports 9400 / 9401 with a throwaway settings file and
-checks auth and the tool lists. Safe to run while anything else is live.
+When sharing the folder, leave out `config/settings.json` (it holds your
+token and is recreated on first launch), `logs/`, `.mcp-runs/`,
+`.mcp-backups/` and `__pycache__/`.
 
 ## Tools
 
-**Files System** - `list_directory`, `read_file`, `read_multiple_files`,
-`write_file`, `edit_file`, `create_directory`, `move_file`, `delete_file`,
-`search_files`, `grep`, `get_file_info`
+**Files System** (port 9500)
 
-**Terminal** - `run_command`, `get_active_project`, `list_skills`,
-`get_skill`
+| Tool | What it does |
+| --- | --- |
+| `read_file` | Paged text read (`offset`/`limit`, long lines clipped); PNG/JPEG/GIF/WebP come back as images |
+| `read_multiple_files` | Several files in one call, each paged |
+| `write_file` | Create or replace; keeps the existing line endings and BOM |
+| `edit_file` | Exact snippet replace (`replace_all`, `dry_run`); refuses non-UTF-8 files instead of corrupting them |
+| `list_directory`, `get_file_info` | Listing (capped) and metadata |
+| `search_files`, `grep` | Glob and regex search, skipping `.git`, `node_modules` and friends |
+| `create_directory`, `move_file`, `delete_file` | The usual, with undo |
+| `list_changes`, `undo_change` | Undo history (when backups are enabled) |
+| `pack_files`, `unpack_files` | Base64 zip transfer to and from an agent's own sandbox - for images, PDFs, office files, whole folders |
 
-Paths may be absolute or relative to the active project. Relative is
-preferred: it keeps working after the user switches projects.
+**Terminal** (port 9501) - commands go through `cmd.exe`
 
-## Projects
+| Tool | What it does |
+| --- | --- |
+| `run_command` | Runs a command and waits up to 45 s; if it is still running it stays alive in the background and the reply gives its job id |
+| `start_process` | Starts a dev server, watcher or long build in the background |
+| `wait_process` | Waits for a job and returns early when it ends or a line matches `until` (regex); `tail` for the last lines |
+| `get_output`, `stop_process`, `list_processes` | Job output (paged or `tail`), stop the whole process tree, list jobs |
+| `get_active_project` | The default folder, whether outside access is allowed, other projects |
+| `list_skills`, `get_skill` | Skills with groups (`design/...`) and project skills (`.agents/skills`, `.claude/skills`, `.opencode/skills`) |
+| `notify_user` | Telegram "task finished" message, if configured |
 
-The active project decides where relative paths resolve and where commands
-run. It is read on every tool call, so switching takes effect immediately
-with no restart.
+Every result is sent once, as plain text. (FastMCP's default also sends a
+structured copy, which doubles what the agent pays for each reply.)
 
-By default, paths outside the active project root are refused. Set
-`security.allow_outside_project` to `true` to lift that.
+## Projects and paths
 
-## Auth
+The active project is the default for relative paths and for commands
+without `cwd`. It is read on every call, so switching takes effect at
+once - for every connected agent, because they all share this machine.
+Agents should therefore use absolute paths. File tools refuse paths
+outside the active project unless `security.allow_outside_project` is on.
 
-Every request needs the token from `config\settings.json`:
+## Security
 
-```
-Authorization: Bearer <token>
-```
+- **The token is full control of this PC.** `run_command` runs anything
+  the user can run, so the path checks of the file tools are a convenience,
+  not a sandbox. Keep the token secret; regenerate it if it leaks.
+- Every request needs `Authorization: Bearer <token>` (`X-API-Key` and
+  `X-Auth-Token` also work). 20 wrong tokens from one address within five
+  minutes block that address for 15 minutes (HTTP 429); behind the tunnel
+  the real address comes from `CF-Connecting-IP`.
+- `/health` needs no token and reveals only `{"status", "server"}`.
+- An accident guard (`security.block_dangerous_commands`, on by default)
+  refuses a short list of commands that wreck a machine (`format`,
+  `diskpart`, `shutdown`, deleting a drive root, ...) or kill this app or
+  its tunnel (`taskkill /im python.exe`, `cloudflared tunnel delete`, ...).
+- Agents cannot overwrite `config/settings.json` through the file tools
+  (`security.allow_settings_edit`).
 
-`X-API-Key` and `X-Auth-Token` are accepted too, for clients that cannot
-send an Authorization header. Requests without a valid token get 401 before
-reaching any tool. Use header-based auth when adding the connection in
-Notion.
+## Settings
 
-The token is generated once and reused across restarts. It only changes if
-you regenerate it, which invalidates the connections already added in
-Notion.
+`config/settings.json` is created on first run. Prefer the panel or the
+CLI flags: an invalid file is moved aside as `settings.broken.json` and
+replaced with defaults. Useful keys:
 
-## Ports
+| Key | Default | Meaning |
+| --- | --- | --- |
+| `limits.command_timeout` | 45 | How long `run_command` waits before backgrounding (never more than 50) |
+| `limits.max_output_chars` | 100000 | Cap on one command output or file page |
+| `limits.max_read_lines` | 900 | Default page size of `read_file` |
+| `limits.max_image_bytes` | 5000000 | Largest image `read_file` returns |
+| `limits.max_pack_mb` | 25 | Largest `pack_files` / `unpack_files` archive |
+| `servers.session_idle_seconds` | 900 | Drop MCP sessions idle this long |
+| `security.allow_outside_project` | false | Let file tools leave the active project |
+| `security.block_dangerous_commands` | true | Accident guard |
+| `backups.enabled` | false | Keep the undo history in `.mcp-backups/` |
 
-Defaults are 9500 (Files System) and 9501 (Terminal). The old gateway still
-owns 9300 / 9301, so both stacks can run side by side; the cloudflared
-ingress must point at whichever ports are configured here.
+## Logs
+
+The panel's Activity card shows one line per tool call (tool, key
+arguments, duration, error). The same lines go to `logs/bridge.log`
+(rotated at about 1 MB), so a panel started without a console can still
+be diagnosed.
 
 ## Cloudflare Tunnel
 
-One-time setup:
+One-time setup, with your own tunnel name and hostnames:
 
-```
+```cmd
 cloudflared tunnel login
-cloudflared tunnel create notion-sync
-cloudflared tunnel route dns notion-sync mcp-files.wolroom.store
-cloudflared tunnel route dns notion-sync mcp-term.wolroom.store
+cloudflared tunnel create mcp-agent-bridge
+cloudflared tunnel route dns mcp-agent-bridge alex-files.example.com
+cloudflared tunnel route dns mcp-agent-bridge alex-term.example.com
 ```
 
 Ingress in the cloudflared config, keeping `http_status:404` last:
 
 ```yaml
-tunnel: notion-sync
-credentials-file: C:\Users\Dima\.cloudflared\<tunnel-id>.json
+tunnel: mcp-agent-bridge
+credentials-file: C:\Users\<you>\.cloudflared\<tunnel-id>.json
 ingress:
-  - hostname: cmd.wolroom.store
-    service: http://localhost:8734
-  - hostname: mcp-files.wolroom.store
+  - hostname: alex-files.example.com
     service: http://localhost:9500
-  - hostname: mcp-term.wolroom.store
+  - hostname: alex-term.example.com
     service: http://localhost:9501
   - service: http_status:404
 ```
 
-`cmd.wolroom.store` stays as a fallback to the legacy command server.
+cloudflared runs as a child process of the panel: it starts with it and
+stops when the panel exits. A wildcard CNAME (`*` -> your tunnel) lets
+every teammate pick a prefix without touching DNS.
 
-cloudflared runs as a child process: it starts with the app and is
-terminated when the app exits.
+## Tests
 
-Notion endpoints:
+Plain scripts, each safe to run while the real panel is live (throwaway
+settings, ports 9400/9401 at most):
 
-- Files System: `https://mcp-files.wolroom.store/mcp`
-- Terminal: `https://mcp-term.wolroom.store/mcp`
-
-## Status
-
-Done: settings store, project registry, path sandbox, logging, process
-supervisor, both MCP servers, bearer auth, tunnel wiring, smoke test,
-control panel with the Notion setup guide.
-
-Next: session identification experiments, then agent memory across chats.
+```cmd
+python tests\tools_test.py     :: tool behaviour through FastMCP
+python tests\smoke_test.py     :: both servers over HTTP: auth, tool lists, /health
+python tests\jobs_test.py
+python tests\backups_test.py
+python tests\test_notifier.py
+```
