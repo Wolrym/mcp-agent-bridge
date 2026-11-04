@@ -1,10 +1,9 @@
-"""Notion setup guide - a separate screen, opened as a modal dialog.
+"""Setup guide - a separate screen, opened as a modal dialog.
 
-Everything needed to wire this machine into Notion lives here: the two
-endpoint URLs, the auth token, the ready-to-paste skill text, and the
-exact wording to use when asking the chat to add an MCP connection.
-Every value has a copy button, because all of this ends up pasted into
-Notion by hand.
+Everything needed to connect an MCP client to this machine lives here:
+the two endpoint URLs, the auth token, a config snippet, a ready-made
+request for chat-based assistants, and the skill texts. Every value has
+a copy button, because all of this ends up pasted into a client by hand.
 
 The dialog uses the same custom chrome as the main window, so it looks
 like part of the app rather than a Windows dialog.
@@ -40,6 +39,21 @@ CONNECT_PROMPT = (
     "URL: {files_url}\n"
     "Authentication: Bearer Token"
 )
+
+# For clients configured through a JSON file (mcp.json and the like). The
+# token stays a placeholder so the snippet can be shown and shared safely.
+CONFIG_SNIPPET = """{{
+  "mcpServers": {{
+    "files-system": {{
+      "url": "{files_url}",
+      "headers": {{ "Authorization": "Bearer <token>" }}
+    }},
+    "terminal": {{
+      "url": "{terminal_url}",
+      "headers": {{ "Authorization": "Bearer <token>" }}
+    }}
+  }}
+}}"""
 
 
 def _page() -> tuple:
@@ -86,13 +100,13 @@ def _step(number: int, text: str) -> QWidget:
 
 
 class SetupGuideDialog(QDialog):
-    """Step-by-step "how do I plug this into Notion" companion."""
+    """Step-by-step "how do I connect a client to this" companion."""
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self.setModal(True)
         self.resize(800, 760)
-        chrome = install_frameless(self, "Notion setup guide", show_maximize=False)
+        chrome = install_frameless(self, "Setup guide", show_maximize=False)
 
         outer = QVBoxLayout(self)
         outer.setContentsMargins(0, 0, 0, 0)
@@ -114,10 +128,10 @@ class SetupGuideDialog(QDialog):
 
         header = QVBoxLayout()
         header.setSpacing(3)
-        header.addWidget(label("Notion setup guide", "title"))
+        header.addWidget(label("Setup guide", "title"))
         header.addWidget(
             label(
-                "Everything needed to connect this machine to a Notion chat. "
+                "Everything needed to connect an MCP client to this machine. "
                 "Values update automatically when settings change.",
                 "subtitle",
             )
@@ -148,7 +162,7 @@ class SetupGuideDialog(QDialog):
 
         endpoints = Card(
             "Endpoints and token",
-            "Paste these into Notion when adding an MCP connection.",
+            "Add both servers to your MCP client with this token.",
         )
         self._files_url = CopyField("Files System URL")
         self._terminal_url = CopyField("Terminal URL")
@@ -160,8 +174,8 @@ class SetupGuideDialog(QDialog):
         endpoints.add(
             label(
                 "The token stays the same across restarts. It only changes if "
-                "you regenerate it on the main screen - and then both Notion "
-                "connections have to be added again.",
+                "you regenerate it on the main screen - and then every client "
+                "connection needs the new one.",
                 "muted",
             )
         )
@@ -169,28 +183,30 @@ class SetupGuideDialog(QDialog):
 
         steps = Card(
             "How to add a connection",
-            "Notion asks for MCP connections inside the chat itself.",
+            "Any client that supports remote (streamable HTTP) MCP servers "
+            "with a Bearer token works.",
         )
         steps.add(
             _step(
                 1,
                 "Press 'Start everything' in the title bar and wait for the "
-                "pill next to it to read 'Ready in Notion'. Turn on autostart "
+                "pill next to it to read 'Ready (public)'. Turn on autostart "
                 "on the main screen to skip this step in future.",
             )
         )
         steps.add(
             _step(
                 2,
-                "In a Notion chat, ask the assistant to connect an MCP server. "
-                "Copy the ready-made request below and send it.",
+                "Add a remote MCP server named Files System with the Files System "
+                "URL. Clients with a config file take the snippet below; chat "
+                "assistants that add connections themselves take the request.",
             )
         )
         steps.add(
             _step(
                 3,
-                "In the dialog that appears, choose Bearer Token as the "
-                "authentication method and paste the token above.",
+                "Choose Bearer token authentication (the header is "
+                "'Authorization: Bearer <token>') and paste the token above.",
             )
         )
         steps.add(
@@ -213,6 +229,18 @@ class SetupGuideDialog(QDialog):
             lambda: QGuiApplication.clipboard().setText(self._prompt_box.toPlainText())
         )
         steps.add(copy_prompt)
+
+        steps.add(label("Config file snippet", "label"))
+        self._config_box = QPlainTextEdit()
+        self._config_box.setReadOnly(True)
+        self._config_box.setFixedHeight(190)
+        steps.add(self._config_box)
+
+        copy_config = button("Copy snippet", "secondary")
+        copy_config.clicked.connect(
+            lambda: QGuiApplication.clipboard().setText(self._config_box.toPlainText())
+        )
+        steps.add(copy_config)
         layout.addWidget(steps)
 
         multiuser = Card(
@@ -238,31 +266,36 @@ class SetupGuideDialog(QDialog):
         page, layout = _page()
 
         instructions = Card(
-            "Skills for Notion AI",
-            "Custom instructions that tell Notion AI how to use tools and libraries.",
+            "Skills",
+            "Instructions that tell an agent how to work with these tools.",
         )
         instructions.add(
             _step(
                 1,
-                "In Notion, open Settings -> Skills and click 'Add a skill'.",
+                "Agents connected to Terminal load skills themselves with "
+                "list_skills and get_skill - just ask for one by name, e.g. "
+                "'load the mcp-coding-agent skill'.",
             )
         )
         instructions.add(
             _step(
                 2,
-                "Click 'Copy skill text' on any skill below and paste it as the skill content.",
+                "If your client has its own skills or custom-instructions "
+                "feature, copy a skill's text below and paste it there.",
             )
         )
         instructions.add(
             _step(
                 3,
-                "Name the skill in Notion using the title or slug shown on the card.",
+                "Grouped skills (design/, animation/, ...) are listed "
+                "collapsed; agents open a group with list_skills(group=...).",
             )
         )
         instructions.add(
             _step(
                 4,
-                "In any Notion chat, mention the skill to activate it for your session.",
+                "Project-specific skills go into <project>/.agents/skills/"
+                "<name>/SKILL.md; agents see them with list_skills(project=...).",
             )
         )
         layout.addWidget(instructions)
@@ -303,7 +336,8 @@ class SetupGuideDialog(QDialog):
             _step(
                 1,
                 "Pick the project on the main screen before starting a chat. "
-                "Tools resolve paths against the active project root.",
+                "It is the default for relative paths; agents should still "
+                "use absolute paths.",
             )
         )
         habits.add(
@@ -323,9 +357,9 @@ class SetupGuideDialog(QDialog):
         habits.add(
             _step(
                 4,
-                "Closing the app stops the servers and the tunnel. Notion will "
-                "report the connection as unavailable - that is expected, just "
-                "start the app again.",
+                "Closing the app stops the servers and the tunnel. Clients "
+                "will report the connection as unavailable - that is expected, "
+                "just start the app again.",
             )
         )
         layout.addWidget(habits)
@@ -334,23 +368,23 @@ class SetupGuideDialog(QDialog):
         trouble.add(
             _step(
                 1,
-                "Notion cannot connect: check the badges here first. Nine times "
-                "out of ten the app simply is not running.",
+                "A client cannot connect: check the badges here first. Nine "
+                "times out of ten the app simply is not running.",
             )
         )
         trouble.add(
             _step(
                 2,
-                "401 responses mean the token in Notion no longer matches the "
-                "one on this screen. Add the connection again with the current "
-                "token.",
+                "401 responses mean the client's token no longer matches the "
+                "one on this screen. Update the connection with the current "
+                "token. 429 means too many wrong tokens: wait 15 minutes.",
             )
         )
         trouble.add(
             _step(
                 3,
-                "Port already in use: another copy of the app, or the old "
-                "gateway, is still listening on the same port.",
+                "Port already in use: another copy of the app is still "
+                "listening on the same port.",
             )
         )
         trouble.add(
@@ -387,6 +421,9 @@ class SetupGuideDialog(QDialog):
         self._terminal_url.set_value(terminal_url)
         self._token.set_value(data["auth"]["token"])
         self._prompt_box.setPlainText(CONNECT_PROMPT.format(files_url=files_url))
+        self._config_box.setPlainText(
+            CONFIG_SNIPPET.format(files_url=files_url, terminal_url=terminal_url)
+        )
 
         self._load_skills()
 
@@ -403,13 +440,25 @@ class SetupGuideDialog(QDialog):
             if widget is not None:
                 widget.deleteLater()
 
-        all_skills = skills_module.discover()
-        self._skills_count_label.setText(f"Discovered skills ({len(all_skills)})")
+        found = skills_module.discover()
+        # Grouped skills would bury the bridge's own under dozens of cards;
+        # they get one summary line instead.
+        all_skills = [s for s in found if not s.get("group")]
+        groups: dict = {}
+        for s in found:
+            if s.get("group"):
+                groups[s["group"]] = groups.get(s["group"], 0) + 1
+        self._skills_count_label.setText(f"Skills ({len(all_skills)})")
+        if groups:
+            summary = ", ".join(f"{name}/ ({count})" for name, count in sorted(groups.items()))
+            self._skills_list_layout.addWidget(
+                label("Groups, loaded by agents on demand: " + summary, "muted")
+            )
 
         if not all_skills:
             empty_card = Card(
                 "No skills found",
-                f"Place skill folders or .md files in {skills_module.skills_root()}",
+                f"Place skill folders (each with a SKILL.md) in {skills_module.skills_root()}",
             )
             self._skills_list_layout.addWidget(empty_card)
             return

@@ -292,7 +292,7 @@ def send_test_message(token: str = "", chat_id: str = "") -> tuple[bool, str]:
         proj = projects.active_project()
         proj_name = proj["name"]
     except Exception:
-        proj_name = "Notion MCP Bridge"
+        proj_name = "MCP Agent Bridge"
 
     msg = (
         "<b>MCP Agent Bridge</b> &bull; Test Notification\n\n"

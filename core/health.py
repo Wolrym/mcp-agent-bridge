@@ -1,4 +1,4 @@
-"""Readiness checks: "is this thing actually usable from Notion yet?"
+"""Readiness checks: "can an MCP client actually use this yet?"
 
 A started process is not the same as a reachable endpoint - uvicorn needs a
 moment to bind, and cloudflared needs a few seconds to register its tunnel.
@@ -38,7 +38,7 @@ USER_AGENT = (
 OFFLINE = "offline"      # nothing is answering
 STARTING = "starting"    # only part of the stack answers
 LOCAL = "local"          # local endpoints are up, no public access
-READY = "ready"          # reachable the way Notion will reach it
+READY = "ready"          # reachable from the internet, through the tunnel
 
 
 def _probe(url: str, timeout: float) -> dict:
@@ -136,7 +136,7 @@ def snapshot(timeout: float = 3.5, check_public: bool = True) -> dict:
 
     if public:
         if local_ok and all_ok(results["public"]):
-            state, text = READY, "Ready in Notion"
+            state, text = READY, "Ready (public)"
         elif local_ok:
             state, text = STARTING, "Local only"
         elif any_ok(results["local"]) or any_ok(results["public"]):

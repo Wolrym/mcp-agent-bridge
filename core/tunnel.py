@@ -8,9 +8,9 @@ change.
 One-time setup (outside this app):
 
     cloudflared tunnel login
-    cloudflared tunnel create notion-sync
-    cloudflared tunnel route dns notion-sync mcp-files.wolroom.store
-    cloudflared tunnel route dns notion-sync mcp-term.wolroom.store
+    cloudflared tunnel create mcp-agent-bridge
+    cloudflared tunnel route dns mcp-agent-bridge mcp-files.wolroom.store
+    cloudflared tunnel route dns mcp-agent-bridge mcp-term.wolroom.store
 
 Then point ingress at the local ports, keeping http_status:404 last.
 """

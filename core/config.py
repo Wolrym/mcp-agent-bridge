@@ -45,7 +45,8 @@ DEFAULTS: dict[str, Any] = {
     "tunnel": {
         "enabled": False,
         "binary": "cloudflared",
-        "tunnel_name": "notion-sync",
+        # Name of your cloudflared tunnel. Existing installs keep theirs.
+        "tunnel_name": "mcp-agent-bridge",
         "config_file": "",
         "domain": "wolroom.store",
         "user_slug": "",

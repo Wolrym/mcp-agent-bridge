@@ -11,7 +11,7 @@ The native Windows frame is replaced by our own title bar (see
 Two status layers are deliberately kept apart:
   * the per-card badges say whether a process was started by us;
   * the pill in the title bar says whether the endpoints actually answer,
-    which is the only thing that tells you Notion can reach the machine.
+    which is the only thing that tells you a client can reach the machine.
 
 Button convention, kept narrow so nothing looks random:
   * default     - the one obvious action of a card
@@ -134,7 +134,7 @@ class MainWindow(QMainWindow):
 
         # The title bar carries the two things worth seeing without
         # scrolling: the one button that runs the whole stack, and whether
-        # Notion can actually reach it.
+        # an MCP client can actually reach it.
         self._master_button = button(
             "Start everything",
             "default",
@@ -171,13 +171,13 @@ class MainWindow(QMainWindow):
         titles.addWidget(label("MCP Control Panel", "title"))
         titles.addWidget(
             label(
-                "Local coding servers for Notion, running on this machine.",
+                "MCP servers for AI agents, running on this machine.",
                 "subtitle",
             )
         )
         layout.addLayout(titles, 1)
 
-        guide_button = button("Notion setup guide", "secondary")
+        guide_button = button("Setup guide", "secondary")
         guide_button.clicked.connect(self._open_guide)
         layout.addWidget(guide_button, 0, Qt.AlignTop)
         return container
@@ -405,7 +405,7 @@ class MainWindow(QMainWindow):
     def _connection_card(self) -> Card:
         card = Card(
             "Authentication",
-            "Notion sends this token as a Bearer header on every request.",
+            "Clients send this token as a Bearer header on every request.",
         )
         self._token_field = CopyField("Auth token", secret=True)
         card.add(self._token_field)
@@ -416,8 +416,8 @@ class MainWindow(QMainWindow):
 
         card.add(
             label(
-                "The token survives restarts. Regenerating it invalidates the "
-                "connections already added in Notion.",
+                "The token survives restarts. Regenerating it invalidates every "
+                "client connection that uses the old one.",
                 "muted",
             )
         )
@@ -736,7 +736,7 @@ class MainWindow(QMainWindow):
                 "Restart Tunnel?",
                 "The Cloudflare tunnel is currently running.\n\n"
                 "Applying a new domain or user prefix requires restarting the tunnel "
-                "to update Cloudflare ingress routes. Existing Notion chats will need "
+                "to update Cloudflare ingress routes. Connected clients will need "
                 "the updated URLs.\n\n"
                 "Do you want to restart the tunnel now with the new settings?",
                 QMessageBox.Yes | QMessageBox.Cancel,
@@ -821,7 +821,7 @@ class MainWindow(QMainWindow):
             self,
             "Make it active?",
             "Added '" + project["name"] + "'.\n\nMake it the active project "
-            "now? Every open Notion chat starts working in this folder "
+            "now? Every connected agent uses this folder as its default "
             "immediately. '" + active["name"] + "' stays in the list either "
             "way.",
         )
@@ -867,8 +867,8 @@ class MainWindow(QMainWindow):
         confirm = QMessageBox.question(
             self,
             "Regenerate token",
-            "Every Notion connection using the current token will stop "
-            "working until you re-add it. Continue?",
+            "Every client connection using the current token will stop "
+            "working until it gets the new one. Continue?",
         )
         if confirm != QMessageBox.Yes:
             return
@@ -916,9 +916,9 @@ class MainWindow(QMainWindow):
         self._health_pill.setToolTip(detail or "No endpoint answered.")
 
         if state == health.READY:
-            summary = "Notion can reach both servers through the tunnel."
+            summary = "Both servers are reachable through the tunnel."
         elif state == health.LOCAL:
-            summary = "Both servers answer locally. Start the tunnel for Notion."
+            summary = "Both servers answer locally. Start the tunnel for remote clients."
         elif state == health.STARTING:
             summary = "Some endpoints are still coming up: " + detail
         else:

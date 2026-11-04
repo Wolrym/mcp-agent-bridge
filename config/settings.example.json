@@ -13,7 +13,7 @@
   "tunnel": {
     "enabled": false,
     "binary": "cloudflared",
-    "tunnel_name": "notion-sync",
+    "tunnel_name": "mcp-agent-bridge",
     "config_file": "",
     "files_hostname": "mcp-files.wolroom.store",
     "terminal_hostname": "mcp-term.wolroom.store"
