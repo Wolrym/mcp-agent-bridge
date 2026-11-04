@@ -19,7 +19,7 @@ import threading  # noqa: E402
 import traceback  # noqa: E402
 
 from PySide6.QtCore import QLockFile, Qt  # noqa: E402
-from PySide6.QtGui import QColor, QFont, QPalette  # noqa: E402
+from PySide6.QtGui import QColor, QFont, QIcon, QPalette  # noqa: E402
 from PySide6.QtWidgets import QApplication, QMessageBox  # noqa: E402
 
 from core import logs  # noqa: E402
@@ -28,6 +28,29 @@ from gui.main_window import MainWindow  # noqa: E402
 
 THEME_PATH = Path(__file__).resolve().parent / "theme.qss"
 LOG_DIR = PROJECT_ROOT / "logs"
+ICON_DIR = PROJECT_ROOT / "assets"
+APP_ID = "MCPAgentBridge.ControlPanel"
+
+
+def _app_icon() -> QIcon:
+    icon = QIcon()
+    for name in ("icon.ico", "icon.png"):
+        path = ICON_DIR / name
+        if path.is_file():
+            icon.addFile(str(path))
+    return icon
+
+
+def _set_taskbar_identity() -> None:
+    """Group the window under its own taskbar icon, not python.exe's."""
+    if sys.platform != "win32":
+        return
+    try:
+        import ctypes
+
+        ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(APP_ID)
+    except Exception:  # noqa: BLE001 - purely cosmetic
+        pass
 
 
 def _prepare_output() -> None:
@@ -121,8 +144,10 @@ def main(argv: list | None = None) -> int:
     args = list(sys.argv[1:] if argv is None else argv)
 
     _prepare_output()
+    _set_taskbar_identity()
     app = QApplication(sys.argv[:1])
     app.setApplicationName("MCP Agent Bridge")
+    app.setWindowIcon(_app_icon())
 
     lock = _single_instance()
     if lock is None:
