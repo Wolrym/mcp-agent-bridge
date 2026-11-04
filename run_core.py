@@ -7,12 +7,12 @@
     python run_core.py --enable-tunnel                    turn the tunnel on
     python run_core.py --disable-tunnel                   turn the tunnel off
 
-Settings changes should go through these flags (or the future GUI) rather
-than hand-editing config\settings.json: a single JSON syntax mistake there
+Settings changes should go through these flags (or the GUI) rather
+than hand-editing config/settings.json: a single JSON syntax mistake there
 makes the whole file unreadable, which resets everything to defaults.
 
-The GUI will later import `ServerSupervisor` and drive the exact same
-lifecycle, so nothing here is throwaway scaffolding.
+The GUI imports `ServerSupervisor` and drives the exact same lifecycle.
+Log lines go to the console and to logs/bridge.log.
 """
 from __future__ import annotations
 
@@ -26,7 +26,7 @@ from pathlib import Path
 import uvicorn
 
 from core import jobs, logs, projects, tunnel
-from core.config import SETTINGS_PATH, settings
+from core.config import PROJECT_ROOT, SETTINGS_PATH, settings
 from core.processes import registry
 from servers import files_server, terminal_server
 
@@ -288,7 +288,7 @@ def main(argv: list | None = None) -> int:
     )
     parser.add_argument(
         "--regenerate-token", action="store_true",
-        help="Generate a new auth token (breaks existing Notion connections).",
+        help="Generate a new auth token (every connected client needs the new one).",
     )
     args = parser.parse_args(argv)
 
@@ -300,11 +300,8 @@ def main(argv: list | None = None) -> int:
         _print_config()
         return 0
 
-    logs.subscribe(
-        lambda record: print(
-            "[" + record["source"] + "] " + record["message"], flush=True
-        )
-    )
+    logs.enable_console()
+    logs.enable_file(PROJECT_ROOT / "logs" / "bridge.log")
 
     try:
         project = projects.active_project()

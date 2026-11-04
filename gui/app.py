@@ -14,16 +14,69 @@ from pathlib import Path
 # Allow "python gui/app.py" as well as "python -m gui.app".
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from PySide6.QtCore import Qt  # noqa: E402
-from PySide6.QtGui import QColor, QFont, QPalette  # noqa: E402
-from PySide6.QtWidgets import QApplication  # noqa: E402
+import os  # noqa: E402
+import threading  # noqa: E402
+import traceback  # noqa: E402
 
-import os
+from PySide6.QtCore import QLockFile, Qt  # noqa: E402
+from PySide6.QtGui import QColor, QFont, QPalette  # noqa: E402
+from PySide6.QtWidgets import QApplication, QMessageBox  # noqa: E402
+
 from core import logs  # noqa: E402
-from core.config import settings  # noqa: E402
+from core.config import PROJECT_ROOT, settings  # noqa: E402
 from gui.main_window import MainWindow  # noqa: E402
 
 THEME_PATH = Path(__file__).resolve().parent / "theme.qss"
+LOG_DIR = PROJECT_ROOT / "logs"
+
+
+def _prepare_output() -> None:
+    """Make the app safe to run without a console, and leave a trail.
+
+    Started through pythonw.exe (the normal shortcut) there is no console:
+    sys.stdout and sys.stderr are None, and libraries that touch them -
+    uvicorn's log formatter calls sys.stdout.isatty() - crash. They get
+    the null device instead, and every log line goes to logs/bridge.log so
+    a windowless panel can still be diagnosed. With a console (the debug
+    shortcut) the lines are printed live as well.
+    """
+    has_console = sys.stdout is not None
+    for name in ("stdout", "stderr"):
+        if getattr(sys, name) is None:
+            setattr(sys, name, open(os.devnull, "w", encoding="utf-8"))
+    logs.enable_file(LOG_DIR / "bridge.log")
+    if has_console:
+        logs.enable_console()
+
+    def report(text: str) -> None:
+        logs.log("gui", "Unhandled error:\n" + text.rstrip(), level="error")
+
+    previous = sys.excepthook
+
+    def excepthook(exc_type, exc, tb) -> None:
+        report("".join(traceback.format_exception(exc_type, exc, tb)))
+        previous(exc_type, exc, tb)
+
+    def thread_hook(args) -> None:
+        report("".join(traceback.format_exception(
+            args.exc_type, args.exc_value, args.exc_traceback
+        )))
+
+    sys.excepthook = excepthook
+    threading.excepthook = thread_hook
+
+
+def _single_instance() -> QLockFile | None:
+    """Hold a lock while the panel runs; None if another copy holds it.
+
+    Without a console a second double-click used to start a second panel
+    that silently failed on busy ports.
+    """
+    LOG_DIR.mkdir(parents=True, exist_ok=True)
+    lock = QLockFile(str(LOG_DIR / "panel.lock"))
+    if lock.tryLock(200):
+        return lock
+    return None
 
 
 def _load_theme() -> str:
@@ -67,8 +120,18 @@ def _dark_palette() -> QPalette:
 def main(argv: list | None = None) -> int:
     args = list(sys.argv[1:] if argv is None else argv)
 
+    _prepare_output()
     app = QApplication(sys.argv[:1])
-    app.setApplicationName("MCP Control Panel")
+    app.setApplicationName("MCP Agent Bridge")
+
+    lock = _single_instance()
+    if lock is None:
+        QMessageBox.information(
+            None, "MCP Agent Bridge",
+            "The control panel is already running - look for it on the "
+            "taskbar.",
+        )
+        return 0
     app.setStyle("Fusion")
     app.setPalette(_dark_palette())
     app.setFont(QFont("Segoe UI", 10))
@@ -92,7 +155,9 @@ def main(argv: list | None = None) -> int:
     if "--start" in args or autostart:
         window.start_everything()
 
-    return app.exec()
+    code = app.exec()
+    lock.unlock()
+    return code
 
 
 if __name__ == "__main__":
