@@ -8,4 +8,18 @@ logs/
 .vscode/
 .idea/
 *.bak
+*.lnk
+
+# Shelved GUI experiment, kept locally only
+gui/main_window_v2.py
+gui/widgets/setup_guide_v2.py
+start_gui_v2.bat
+
+# Skills: only the bridge's own skills are versioned
+skills/*
+!skills/mcp-coding-agent/
+!skills/mcp-coding-agent-v2/
+
+# Raw user prompts saved by agents (may contain private details)
+.agent/prompts/
 
