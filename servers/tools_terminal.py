@@ -11,7 +11,7 @@ import subprocess
 from datetime import datetime
 from pathlib import Path
 
-from core import jobs, logs, paths, projects, skills
+from core import jobs, logs, notifier, paths, projects, skills
 from core.config import settings
 
 
@@ -99,6 +99,28 @@ def _execute(command: str, working_dir: Path, seconds: int) -> dict:
 
 def register(mcp) -> None:
     """Attach every terminal tool to the given FastMCP instance."""
+    raw_tool = mcp.tool
+
+    def tracked_tool(*args, **kwargs):
+        decorator = raw_tool(*args, **kwargs)
+        def wrapper(fn):
+            import asyncio
+            import functools
+            if asyncio.iscoroutinefunction(fn):
+                @functools.wraps(fn)
+                async def async_wrapped(*f_args, **f_kwargs):
+                    notifier.record_tool_activity(fn.__name__)
+                    return await fn(*f_args, **f_kwargs)
+                return decorator(async_wrapped)
+            else:
+                @functools.wraps(fn)
+                def sync_wrapped(*f_args, **f_kwargs):
+                    notifier.record_tool_activity(fn.__name__)
+                    return fn(*f_args, **f_kwargs)
+                return decorator(sync_wrapped)
+        return wrapper
+
+    mcp.tool = tracked_tool
 
     @mcp.tool()
     async def run_command(command: str, cwd: str = "", timeout: int = 0) -> str:
@@ -410,3 +432,19 @@ def register(mcp) -> None:
             header += [f"  - {ref}" for ref in skill["references"]]
         header += ["", "=" * 60, ""]
         return "\n".join(header) + content
+
+    @mcp.tool()
+    def notify_user(message: str = "") -> str:
+        """Notify the user via Telegram that the agent's task is finished.
+
+        Call this tool at the very end of your work when all files and commands
+        are completed. You can provide a brief, professional summary of what was accomplished.
+
+        Args:
+            message: Optional concise summary or note for the user (1-3 sentences).
+        """
+        cfg = settings.get("notifications", default={}) or {}
+        if not cfg.get("notify_tool_enabled", True):
+            return "Notification tool is disabled in settings."
+        ok, res = notifier.notify_from_agent(message)
+        return res

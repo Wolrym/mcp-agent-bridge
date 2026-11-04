@@ -1,0 +1,1 @@
+https://github.com/vercel-labs/agent-skills/tree/1a2c79d/skills/web-design-guidelines

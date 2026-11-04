@@ -37,7 +37,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from core import backups, health, logs, projects, tunnel
+from core import backups, health, logs, notifier, projects, tunnel
 from core.config import settings
 from gui.widgets.chrome import install_frameless
 from gui.widgets.primitives import (
@@ -101,7 +101,7 @@ class MainWindow(QMainWindow):
 
         self._health_poll = QTimer(self)
         self._health_poll.timeout.connect(self._check_health)
-        self._health_poll.start(2500)
+        self._health_poll.start(4000)
 
         self.refresh()
         self._check_health()
@@ -119,6 +119,7 @@ class MainWindow(QMainWindow):
         layout.addWidget(self._tunnel_card())
         layout.addWidget(self._projects_card())
         layout.addWidget(self._connection_card())
+        layout.addWidget(self._notifications_card())
         layout.addWidget(self._logs_card(), 1)
 
         scroll = QScrollArea()
@@ -422,6 +423,108 @@ class MainWindow(QMainWindow):
         )
         return card
 
+    def _notifications_card(self) -> Card:
+        card = Card(
+            "Telegram Notifications",
+            "Receive alerts when an AI agent finishes executing tools or tasks.",
+        )
+        self._notify_badge = Badge("Disabled", "neutral")
+        card.header_extra(self._notify_badge)
+
+        self._notify_enabled = Switch()
+        self._notify_enabled.toggled.connect(self._set_notifications_enabled)
+        card.add(
+            row(
+                self._notify_enabled,
+                label("Enable Telegram completion notifications", "muted"),
+            )
+        )
+        card.add(separator())
+
+        fields_row = QHBoxLayout()
+        fields_row.setContentsMargins(0, 0, 0, 0)
+        fields_row.setSpacing(8)
+
+        token_col = QVBoxLayout()
+        token_col.setContentsMargins(0, 0, 0, 0)
+        token_col.setSpacing(4)
+        token_col.addWidget(label("Bot Token", "label"))
+        self._bot_token_input = QLineEdit()
+        self._bot_token_input.setEchoMode(QLineEdit.Password)
+        self._bot_token_input.setPlaceholderText("123456:ABC-DEF1234ghIkl-zyx57W2v1u123ew11")
+        self._bot_token_input.textChanged.connect(self._on_notification_fields_changed)
+        token_col.addWidget(self._bot_token_input)
+        fields_row.addLayout(token_col, 3)
+
+        chat_col = QVBoxLayout()
+        chat_col.setContentsMargins(0, 0, 0, 0)
+        chat_col.setSpacing(4)
+        chat_col.addWidget(label("Chat ID", "label"))
+        self._chat_id_input = QLineEdit()
+        self._chat_id_input.setPlaceholderText("e.g. 123456789 or @channel")
+        self._chat_id_input.textChanged.connect(self._on_notification_fields_changed)
+        chat_col.addWidget(self._chat_id_input)
+        fields_row.addLayout(chat_col, 2)
+
+        card.add_layout(fields_row)
+
+        options_row = QHBoxLayout()
+        options_row.setContentsMargins(0, 0, 0, 0)
+        options_row.setSpacing(8)
+
+        self._idle_switch = Switch()
+        self._idle_switch.toggled.connect(self._set_notify_on_idle)
+        options_row.addWidget(self._idle_switch)
+        options_row.addWidget(label("Auto-notify after inactivity (seconds):", "muted"))
+
+        self._idle_timeout_input = QLineEdit()
+        self._idle_timeout_input.setFixedWidth(60)
+        self._idle_timeout_input.setPlaceholderText("60")
+        self._idle_timeout_input.textChanged.connect(self._on_notification_fields_changed)
+        options_row.addWidget(self._idle_timeout_input)
+        options_row.addStretch(1)
+
+        card.add_layout(options_row)
+
+        tool_row = QHBoxLayout()
+        tool_row.setContentsMargins(0, 0, 0, 0)
+        tool_row.setSpacing(8)
+
+        self._notify_tool_switch = Switch()
+        self._notify_tool_switch.toggled.connect(self._set_notify_tool_enabled)
+        tool_row.addWidget(self._notify_tool_switch)
+        tool_row.addWidget(label("Enable notify_user tool for agents to send custom notes", "muted"))
+        tool_row.addStretch(1)
+
+        card.add_layout(tool_row)
+        card.add(separator())
+
+        btn_row = QHBoxLayout()
+        btn_row.setContentsMargins(0, 0, 0, 0)
+        btn_row.setSpacing(8)
+
+        self._save_notify_btn = button("Save", "default")
+        self._save_notify_btn.setEnabled(False)
+        self._save_notify_btn.clicked.connect(self._save_notification_settings)
+
+        self._test_notify_btn = button("Send Test Message", "secondary")
+        self._test_notify_btn.clicked.connect(self._send_test_notification)
+
+        btn_row.addWidget(self._save_notify_btn)
+        btn_row.addWidget(self._test_notify_btn)
+        btn_row.addStretch(1)
+
+        card.add_layout(btn_row)
+
+        card.add(
+            label(
+                "Credentials can also be provided via TELEGRAM_BOT_TOKEN and "
+                "TELEGRAM_CHAT_ID in your environment or .env file.",
+                "muted",
+            )
+        )
+        return card
+
     def _logs_card(self) -> Card:
         card = Card("Activity", "Live output from the servers and the tunnel.")
         self._log_view = QPlainTextEdit()
@@ -544,6 +647,61 @@ class MainWindow(QMainWindow):
             QMessageBox.information(self, "Cleaned", msg)
         else:
             QMessageBox.warning(self, "Error", msg)
+
+    def _set_notifications_enabled(self, enabled: bool) -> None:
+        settings.set("notifications", "enabled", bool(enabled))
+        logs.log("notify", f"Telegram notifications {'enabled' if enabled else 'disabled'}")
+        self.refresh()
+
+    def _set_notify_on_idle(self, enabled: bool) -> None:
+        settings.set("notifications", "notify_on_idle", bool(enabled))
+        logs.log("notify", f"Inactivity auto-notification {'enabled' if enabled else 'disabled'}")
+
+    def _set_notify_tool_enabled(self, enabled: bool) -> None:
+        settings.set("notifications", "notify_tool_enabled", bool(enabled))
+        logs.log("notify", f"notify_user tool {'enabled' if enabled else 'disabled'}")
+
+    def _on_notification_fields_changed(self) -> None:
+        cfg = settings.get("notifications", default={}) or {}
+        curr_token = str(cfg.get("bot_token") or "")
+        curr_chat = str(cfg.get("chat_id") or "")
+        curr_idle = str(cfg.get("idle_timeout_seconds") or 60)
+
+        new_token = self._bot_token_input.text().strip()
+        new_chat = self._chat_id_input.text().strip()
+        new_idle = self._idle_timeout_input.text().strip()
+
+        changed = (new_token != curr_token) or (new_chat != curr_chat) or (new_idle != curr_idle)
+        self._save_notify_btn.setEnabled(changed)
+
+    def _save_notification_settings(self) -> None:
+        token = self._bot_token_input.text().strip()
+        chat_id = self._chat_id_input.text().strip()
+        raw_idle = self._idle_timeout_input.text().strip()
+        try:
+            idle_secs = max(5, int(raw_idle))
+        except ValueError:
+            idle_secs = 60
+            self._idle_timeout_input.setText("60")
+
+        settings.set("notifications", "bot_token", token)
+        settings.set("notifications", "chat_id", chat_id)
+        settings.set("notifications", "idle_timeout_seconds", idle_secs)
+        logs.log("notify", "Notification settings saved")
+        self._save_notify_btn.setEnabled(False)
+        self.refresh()
+
+    def _send_test_notification(self) -> None:
+        token = self._bot_token_input.text().strip()
+        chat_id = self._chat_id_input.text().strip()
+
+        ok, msg = notifier.send_test_message(token=token, chat_id=chat_id)
+        if ok:
+            QMessageBox.information(self, "Success", "Telegram test message sent successfully!")
+            logs.log("notify", "Telegram test message delivered successfully")
+        else:
+            QMessageBox.warning(self, "Failed to Send", f"Telegram API error: {msg}")
+            logs.log("notify", f"Telegram test message failed: {msg}", level="warn")
 
     def _on_tunnel_inputs_changed(self) -> None:
         cfg = settings.get("tunnel", default={}) or {}
@@ -735,7 +893,7 @@ class MainWindow(QMainWindow):
 
         def work() -> None:
             try:
-                result = health.snapshot(timeout=1.5)
+                result = health.snapshot(timeout=3.5)
             except Exception as exc:  # noqa: BLE001 - never kill the worker
                 result = {
                     "state": health.OFFLINE,
@@ -836,6 +994,47 @@ class MainWindow(QMainWindow):
         self._backups_switch.blockSignals(True)
         self._backups_switch.setChecked(backups_enabled)
         self._backups_switch.blockSignals(False)
+
+        # Sync notifications
+        notify_cfg = data.get("notifications", {}) or {}
+        notify_enabled = bool(notify_cfg.get("enabled", False))
+        self._notify_enabled.blockSignals(True)
+        self._notify_enabled.setChecked(notify_enabled)
+        self._notify_enabled.blockSignals(False)
+
+        is_cfg = notifier.is_configured()
+        if notify_enabled and is_cfg:
+            self._notify_badge.set_state("Active", "success")
+        elif notify_enabled:
+            self._notify_badge.set_state("No Credentials", "warning")
+        else:
+            self._notify_badge.set_state("Disabled", "neutral")
+
+        resolved_token, resolved_chat = notifier.get_credentials()
+        raw_token = str(notify_cfg.get("bot_token") or "")
+        raw_chat = str(notify_cfg.get("chat_id") or "")
+        raw_idle = str(notify_cfg.get("idle_timeout_seconds") or 60)
+
+        if not self._save_notify_btn.isEnabled():
+            self._bot_token_input.blockSignals(True)
+            self._chat_id_input.blockSignals(True)
+            self._idle_timeout_input.blockSignals(True)
+            self._bot_token_input.setText(raw_token or (resolved_token if resolved_token else ""))
+            self._chat_id_input.setText(raw_chat or (resolved_chat if resolved_chat else ""))
+            self._idle_timeout_input.setText(raw_idle)
+            self._bot_token_input.blockSignals(False)
+            self._chat_id_input.blockSignals(False)
+            self._idle_timeout_input.blockSignals(False)
+
+        idle_enabled = bool(notify_cfg.get("notify_on_idle", True))
+        self._idle_switch.blockSignals(True)
+        self._idle_switch.setChecked(idle_enabled)
+        self._idle_switch.blockSignals(False)
+
+        tool_enabled = bool(notify_cfg.get("notify_tool_enabled", True))
+        self._notify_tool_switch.blockSignals(True)
+        self._notify_tool_switch.setChecked(tool_enabled)
+        self._notify_tool_switch.blockSignals(False)
 
         self._render_projects(data)
         self._refresh_status()

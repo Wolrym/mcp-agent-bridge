@@ -103,7 +103,7 @@ def public_urls() -> dict:
     return urls
 
 
-def snapshot(timeout: float = 2.0, check_public: bool = True) -> dict:
+def snapshot(timeout: float = 3.5, check_public: bool = True) -> dict:
     """Probe every endpoint and summarise the result.
 
     Returns a dict with:

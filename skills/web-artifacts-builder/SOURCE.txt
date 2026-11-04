@@ -1,0 +1,1 @@
+https://github.com/anthropics/skills/tree/ca45fc4/skills/web-artifacts-builder
