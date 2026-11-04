@@ -17,6 +17,12 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+# The offscreen platform reads fonts from a folder instead of asking
+# Windows; without this every label renders as empty boxes.
+if sys.platform == "win32":
+    os.environ.setdefault(
+        "QT_QPA_FONTDIR", os.path.join(os.environ.get("WINDIR", r"C:\Windows"), "Fonts")
+    )
 
 _temp = Path(tempfile.mkdtemp(prefix="mcp-shot-"))
 (_temp / "settings.json").write_text(json.dumps({
@@ -50,6 +56,7 @@ def main(argv: list) -> int:
     qt.setPalette(gui_app._dark_palette())
     qt.setFont(QFont("Segoe UI", 10))
     qt.setStyleSheet(gui_app._load_theme())
+    qt.setWindowIcon(gui_app._app_icon())
 
     for text, level in [("Listening on http://127.0.0.1:9500/mcp", "info"),
                         ("read_file(path=C:\\proj\\main.py)  0.02s", "info"),
@@ -62,7 +69,12 @@ def main(argv: list) -> int:
     window.show()
 
     def shoot() -> None:
-        window.grab().save(str(out / "main.png"))
+        shot = window.grab()
+        shot.save(str(out / "main.png"))
+        # Small copies: some clients pass images to the model as base64
+        # text, so the full-size PNG is expensive to look at.
+        shot.copy(0, 0, 640, 56).save(str(out / "titlebar.png"))
+        shot.scaledToWidth(640).save(str(out / "main-small.png"))
         areas = window.findChildren(QScrollArea)
         if areas:
             inner = areas[0].widget()

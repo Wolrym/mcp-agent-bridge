@@ -17,7 +17,7 @@ Usage:
 """
 from __future__ import annotations
 
-from PySide6.QtCore import QEvent, QObject, QRectF, Qt
+from PySide6.QtCore import QEvent, QObject, QRectF, QSize, Qt
 from PySide6.QtGui import QColor, QPainter, QPen
 from PySide6.QtWidgets import (
     QAbstractButton,
@@ -29,6 +29,7 @@ from PySide6.QtWidgets import (
 
 GRIP = 6           # thickness of the invisible resize strips, in pixels
 BAR_HEIGHT = 40
+ICON_SIZE = 18
 
 # Palette, kept in sync with theme.qss.
 ICON = QColor("#a1a1aa")
@@ -151,10 +152,26 @@ class TitleBar(QWidget):
         layout.setContentsMargins(14, 0, 8, 0)
         layout.setSpacing(10)
 
-        dot = QLabel()
-        dot.setObjectName("titleDot")
-        dot.setFixedSize(8, 8)
-        layout.addWidget(dot)
+        # The app icon, so the frameless window still shows whose it is.
+        # Tests and odd setups may have no icon: then a neutral dot.
+        mark = QLabel()
+        icon = window.windowIcon()
+        if icon.isNull():
+            from PySide6.QtWidgets import QApplication
+            icon = QApplication.windowIcon()
+        if icon.isNull():
+            mark.setObjectName("titleDot")
+            mark.setFixedSize(8, 8)
+        else:
+            mark.setObjectName("titleIcon")
+            mark.setFixedSize(ICON_SIZE, ICON_SIZE)
+            try:
+                pixmap = icon.pixmap(QSize(ICON_SIZE, ICON_SIZE), self.devicePixelRatioF())
+            except TypeError:  # older bindings without the ratio overload
+                pixmap = icon.pixmap(ICON_SIZE, ICON_SIZE)
+            mark.setPixmap(pixmap)
+            mark.setScaledContents(True)
+        layout.addWidget(mark)
 
         self._title = QLabel(title)
         self._title.setObjectName("titleText")
