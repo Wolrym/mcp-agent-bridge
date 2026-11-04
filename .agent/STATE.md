@@ -1,62 +1,61 @@
 # STATE: ремейк MCP-моста (mcp-agent-bridge)
 
-Оновлено: 2026-11-04. Фази 1-4 готові й закомічені. Фаза 5 (GUI) не почата.
+Оновлено: 2026-11-05 00:10. Задача (slug для тегів): `remake`.
 
 ## Проєкт
 
 Два локальні MCP-сервери (Files System :9500, Terminal :9501), PySide6-панель і
 Cloudflare Tunnel. Будь-який MCP-клієнт працює з файлами і терміналом на ПК.
 Windows, shell = cmd.exe. Деталі: README.md, ARCHITECTURE.md.
+Промпти користувача дослівно: .agent/prompts/ (не в git).
+Скіли для роботи: skills/mcp-coding-agent-brief (локально), дизайн: skills/design/*.
 
 ## Жорсткі заборони
 
 - НЕ перезапускати і не зупиняти MCP-сервери, панель і cloudflared.
 - НЕ чіпати auth/token у config/settings.json.
 - Завжди абсолютні шляхи; у run_command/start_process завжди cwd.
-- Серверний код діє лише після перезапуску панелі КОРИСТУВАЧЕМ.
-  Перед цим прогнати тести (нижче).
+- Серверний код діє лише після перезапуску панелі КОРИСТУВАЧЕМ; перед цим тести.
 
-## Зроблено (коміти)
+## Теги (схема з 2026-11-05)
 
-- afbd1dc тести notifier/backups більше не пишуть у справжній settings.json
-- b300d32 логи: консоль + logs/bridge.log, старт без консолі, один екземпляр
-- bac724e безпека: guard, гальмо перебору токена, /health без шляхів
-- ea46831 інструменти: без дубля результату, to_thread, авто-фон run_command,
-  wait_process until/tail, CRLF/BOM, read_file для зображень, pack/unpack_files
-- 31f598f, 58582c5 скіли: UI-стек не трекається; mcp-coding-agent-v2
-- f9be187 іконка, ярлики "MCP Agent Bridge" (pythonw) і "(debug)" (консоль)
-- 347494f ізольований gui-тест, tools/screenshot_gui.py -> .mcp-runs/shots
-- 2231b3e без брендингу Notion; 2b29673 README/ARCHITECTURE
-- Теги: pre-remake, pre-remake-wip, checkpoint/2026-11-04-tools-rework,
-  checkpoint/2026-11-04-generic-bridge, pre-gui-redesign (= 2b29673)
-- Локально (не в git): skills/design|animation|frontend/,
-  skills/mcp-coding-agent-brief/SKILL.md
+- `cp/<task>/<NN>-<що>` - проміжна стабільна точка; `00-start` = стан до задачі.
+- `vX.Y` - реліз, лише коли користувач прийняв результат.
+- Перейменовано: pre-remake -> v1.0; pre-remake-wip -> cp/remake/00-start;
+  checkpoint/...-tools-rework -> cp/remake/01-tools;
+  checkpoint/...-generic-bridge -> cp/remake/02-generic;
+  pre-gui-redesign -> cp/remake/03-docs.
 
-## Тести (усі зелені на 2b29673)
+## Зроблено
 
-tests/tools_test.py, jobs_test.py, smoke_test.py (порти 9400/9401),
-backups_test.py, test_notifier.py, gui_controls_test.py, health_selftest.py.
+- Фази 1-4 (інструменти, логи, безпека, ребрендинг, скіли v2, ярлики, доки).
+- Живий тест після перезапуску (2026-11-04 23:48): 14/14 PASS
+  (.mcp-runs/live_probe.py): pack/unpack, read_file PNG, CRLF, settings.json
+  захищений, wait_process until, run_command сам іде у фон ~50 с.
+- Знахідка: Notion віддає image-результат моделі як base64-текст (~22K
+  символів на іконку 256 px), а не як картинку. Записано в скіли.
+- Цей раунд: нова іконка (tools/make_icon.py, варіант deck; є mono і tile),
+  іконка в title bar замість сірої крапки, тиша для "context canceled" від
+  cloudflared, без ERROR при навмисній зупинці тунелю, get_active_project
+  показує шлях до call log, скіли: "Where the work lives" (ПК - основне
+  місце, пісочниця - чернетка) + brief: схема тегів, аварійний хендоф без
+  інструментів, відновлення через call log.
 
-## Інциденти (повідомлено користувачу)
+## Чекає на користувача
 
-- Токен Telegram-бота засвітився в чаті -> відкликати в @BotFather.
-- Старий test_notifier.py затер bot_token/chat_id у settings.json. Панель
-  тримає правильні значення в пам'яті: перемкнути будь-який параметр у
-  панелі перед перезапуском, щоб вона записала їх назад.
-- Можливий зайвий журнал .mcp-backups у C:\Users\Dima\VSCodeProjects.
+- Обрати іконку (deck / mono / tile) і перезапустити панель.
+- Відповісти на питання з останнього повідомлення агента (акцент GUI,
+  чи додавати brief/v2 як скіли в Notion).
 
 ## Наступний крок
 
-1. Користувач перезапускає панель через ярлик "MCP Agent Bridge".
-2. Живий тест у клієнті: read_file на PNG, pack_files/unpack_files,
-   run_command > 45 с (має піти у фон), list_skills (групи), /health.
-3. Фаза 5: редизайн GUI (графіт, не чорний; акцент teal #2DD4BF; єдині
-   компоненти). Файли: gui/theme.qss, gui/app.py (_dark_palette),
-   gui/main_window.py, gui/widgets/primitives.py, chrome.py, setup_guide.py.
-   Перевірка: python tools\screenshot_gui.py + read_file на PNG.
-   Окремий коміт і тег checkpoint/<дата>-gui-redesign.
+Фаза 5: редизайн GUI. Графіт (не чорний), акцент - узгодити (оранжевий лише в
+іконці, кнопки - світлі?). Файли: gui/theme.qss, gui/app.py (_dark_palette),
+gui/main_window.py, gui/widgets/primitives.py, chrome.py, setup_guide.py.
+Перевірка: python tools\screenshot_gui.py, кроп/зменшення PNG перед read_file.
+Тег: cp/remake/05-gui; після прийняття - v2.0.
 
 ## Для наступного агента
 
-Прочитай цей файл, ARCHITECTURE.md, skills/mcp-coding-agent-v2/SKILL.md,
-`git log --oneline -15`, `git status --short`.
+Прочитай цей файл, останній файл у .agent/prompts/, ARCHITECTURE.md,
+`git log --oneline -15`, `git tag -n3 -l "cp/remake/*"`, `git status --short`.
