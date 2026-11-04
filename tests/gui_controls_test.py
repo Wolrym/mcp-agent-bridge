@@ -11,12 +11,21 @@ Run with:
 """
 from __future__ import annotations
 
+import json
 import os
 import sys
+import tempfile
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+
+# Throwaway settings: the autostart check toggles a real setting.
+_settings_file = Path(tempfile.mkdtemp(prefix="mcp-gui-")) / "settings.json"
+_settings_file.write_text(
+    json.dumps({"auth": {"enabled": True, "token": "gui-test"}}), encoding="utf-8"
+)
+os.environ["MCP_SETTINGS_PATH"] = str(_settings_file)
 
 from PySide6.QtWidgets import QApplication  # noqa: E402
 
