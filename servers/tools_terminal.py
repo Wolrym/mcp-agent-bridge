@@ -3,32 +3,57 @@
 Execution and context only: running commands, reporting which project is
 active, and serving coding skills. Anything that reads or writes files
 lives in the Files System server instead.
+
+Every command - quick or slow - runs as a job whose output streams to a
+file. run_command simply waits for its job for a while: if the command
+finishes in time the reply is the full result, and if it does not, the
+job keeps running and the reply hands over its id. Nothing is killed just
+because the client's one-minute request window ran out.
 """
 from __future__ import annotations
 
 import asyncio
-import subprocess
+import re
 from datetime import datetime
 from pathlib import Path
 
-from core import jobs, logs, notifier, paths, projects, skills
+from core import guard, jobs, logs, notifier, paths, projects, skills
 from core.config import settings
+from servers.common import install
+
+# The client abandons a request after about a minute, so no single call
+# may wait longer than this, whatever the settings say.
+CLIENT_SAFE_WAIT = 50
 
 
 def _limit(name: str, fallback: int) -> int:
     return int(settings.get("limits", name, default=fallback) or fallback)
 
 
-def _truncate(text: str, cap: int) -> str:
+def _wait_budget(requested: int, default: int) -> int:
+    ceiling = min(
+        _limit("command_timeout_max", CLIENT_SAFE_WAIT),
+        _limit("wait_seconds_max", CLIENT_SAFE_WAIT),
+        CLIENT_SAFE_WAIT,
+    )
+    return max(1, min(requested or default, ceiling))
+
+
+def _clip(text: str, cap: int) -> str:
+    """Keep the head and the tail of an oversized output."""
     if len(text) <= cap:
         return text
-    return text[:cap] + f"\n... (truncated at {cap} characters)"
+    head = text[: cap // 3]
+    tail = text[-(cap - len(head)):]
+    dropped = len(text) - len(head) - len(tail)
+    return f"{head}\n... ({dropped} characters cut from the middle) ...\n{tail}"
 
 
-def _format_job_output(job, offset: int = 0, limit: int = 200) -> str:
-    """Render a job's status and a page of its output. Shared by get_output
-    and wait_process so both report output the same way."""
-    page = job.read_output(offset=offset, limit=min(limit, _limit("max_read_lines", 900)))
+def _format_job_output(job, offset: int = 0, limit: int = 200, tail: int = 0) -> str:
+    """Render a job's status and a page of its output."""
+    page = job.read_output(
+        offset=offset, limit=min(limit, _limit("max_read_lines", 900)), tail=tail
+    )
     head = [
         f"job {job.id}: {job.state()} after {round(job.elapsed())}s",
         f"$ {job.command}",
@@ -44,190 +69,144 @@ def _format_job_output(job, offset: int = 0, limit: int = 200) -> str:
 
     first = page["start"] + 1
     head.append(f"[output: lines {first}-{page['start'] + shown} of {total}]")
-    body = "\n".join(page["lines"])
-    tail = []
+    body = _clip("\n".join(page["lines"]), _limit("max_output_chars", 100000))
+    tail_note = []
     remaining = total - page["next_offset"]
     if remaining > 0:
-        tail.append(
-            f"[{remaining} more line(s) - continue with "
-            f"offset={page['next_offset']}]"
+        tail_note.append(
+            f"[{remaining} more line(s) - continue with offset={page['next_offset']}]"
         )
     elif job.running:
-        tail.append(
-            "[still running - call again later with "
-            f"offset={page['next_offset']} for new output]"
+        tail_note.append(
+            f"[end of output so far - next read: offset={page['next_offset']}]"
         )
-    return "\n".join(head + ["--- output ---", body] + tail)
+    return "\n".join(head + ["--- output ---", body] + tail_note)
 
 
-def _execute(command: str, working_dir: Path, seconds: int) -> dict:
-    """Run a command to completion. Always called on a worker thread."""
-    try:
-        process = subprocess.Popen(
-            command,
-            shell=True,
-            cwd=str(working_dir),
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
-            encoding="utf-8",
-            errors="replace",
-            # Own process group: required for the polite Ctrl+Break below,
-            # and it keeps stray console windows from appearing.
-            creationflags=jobs.CREATION_FLAGS,
-        )
-    except Exception as exc:  # noqa: BLE001
-        return {"error": str(exc)}
+async def _wait(job, seconds: int, pattern=None, offset: int = 0) -> bool:
+    """Wait until the job ends, `pattern` shows up, or time runs out.
 
-    try:
-        stdout, stderr = process.communicate(timeout=seconds)
-    except subprocess.TimeoutExpired:
-        # Stop the whole tree, asking nicely first so pip or npm can clear
-        # its partial downloads. Terminating only the shell would leave the
-        # real work - node, msbuild, pip - running and holding file locks,
-        # which is how a timed-out install used to poison the next attempt.
-        ending = jobs.kill_tree(process)
-        stdout, stderr = process.communicate()
-        return {
-            "timed_out": True,
-            "ending": ending,
-            "stdout": stdout,
-            "stderr": stderr,
-        }
-    return {"exit_code": process.returncode, "stdout": stdout, "stderr": stderr}
+    Returns True when the pattern matched.
+    """
+    loop = asyncio.get_running_loop()
+    deadline = loop.time() + seconds
+
+    async def matches() -> bool:
+        # Reading the output file is blocking I/O; keep it off the loop
+        # both servers share.
+        return await asyncio.to_thread(job.output_matches, pattern, offset)
+
+    while job.running and loop.time() < deadline:
+        if pattern is not None and await matches():
+            return True
+        await asyncio.sleep(0.25 if pattern is None else 0.5)
+    return pattern is not None and await matches()
+
+
+def _collect(job) -> tuple:
+    """Read a finished job's output and drop the job (blocking)."""
+    lines = job.read_lines()
+    exit_code = job.exit_code
+    jobs.registry.forget(job.id)
+    return lines, exit_code
+
+
+def _working_dir(cwd: str) -> Path:
+    working_dir = paths.resolve(cwd, must_exist=True)
+    if not working_dir.is_dir():
+        raise paths.PathError(f"not a directory: {working_dir}")
+    return working_dir
 
 
 def register(mcp) -> None:
     """Attach every terminal tool to the given FastMCP instance."""
-    raw_tool = mcp.tool
-
-    def tracked_tool(*args, **kwargs):
-        decorator = raw_tool(*args, **kwargs)
-        def wrapper(fn):
-            import asyncio
-            import functools
-            if asyncio.iscoroutinefunction(fn):
-                @functools.wraps(fn)
-                async def async_wrapped(*f_args, **f_kwargs):
-                    notifier.record_tool_activity(fn.__name__)
-                    return await fn(*f_args, **f_kwargs)
-                return decorator(async_wrapped)
-            else:
-                @functools.wraps(fn)
-                def sync_wrapped(*f_args, **f_kwargs):
-                    notifier.record_tool_activity(fn.__name__)
-                    return fn(*f_args, **f_kwargs)
-                return decorator(sync_wrapped)
-        return wrapper
-
-    mcp.tool = tracked_tool
+    install(mcp, "terminal")
 
     @mcp.tool()
     async def run_command(command: str, cwd: str = "", timeout: int = 0) -> str:
-        """Run a short shell command inside the active project and wait for it.
+        """Run a shell command and wait for its result.
 
-        The machine is Windows, so commands must be PowerShell or CMD
-        compatible.
+        The machine is Windows and commands go through cmd.exe: use cmd
+        syntax, or wrap PowerShell explicitly with
+        powershell -NoProfile -Command "...".
 
-        Use this only for work that finishes quickly. A tool call is an HTTP
-        request and the client stops waiting after about a minute, so
-        installs, builds, test suites and dev servers belong in
-        start_process instead - asking for a longer timeout here cannot
-        work, the answer would arrive after nobody is listening.
+        The client gives up on a call after about a minute, so this waits
+        at most `timeout` seconds (never more than 50). A command still
+        running by then is NOT killed: it carries on as a background job,
+        and the reply gives the job id for wait_process, get_output and
+        stop_process. There is no need to guess in advance whether
+        something is quick.
 
         Args:
             command: Command line to execute.
-            cwd: Working directory, absolute or relative to the project.
-                Defaults to the project root.
-            timeout: Seconds before the command is aborted. 0 uses the
-                configured default. Anything above the configured maximum is
-                clamped down to it.
+            cwd: Working directory. Use an absolute path. Defaults to the
+                active project root.
+            timeout: Seconds to wait before leaving the command running in
+                the background. 0 uses the default (45).
         """
         if not command.strip():
             return "Error: command is required."
-
-        requested = timeout or _limit("command_timeout", 60)
-        ceiling = _limit("command_timeout_max", 120)
-        seconds = max(1, min(requested, ceiling))
+        blocked = guard.check(command)
+        if blocked:
+            logs.log("terminal", f"Blocked: {command}", level="warn")
+            return "Error: " + blocked
         try:
-            working_dir = paths.resolve(cwd, must_exist=True)
+            working_dir = _working_dir(cwd)
         except Exception as exc:  # noqa: BLE001
             return f"Error: {exc}"
-        if not working_dir.is_dir():
-            return f"Error: not a directory: {working_dir}"
 
-        logs.log("terminal", f"$ {command}  (cwd: {working_dir})")
-        # The command runs on a worker thread. Executing it inline would
-        # block the event loop that serves both MCP servers, so one slow
-        # command would freeze every other tool call - and the health check
-        # with them - until it finished.
-        result = await asyncio.to_thread(_execute, command, working_dir, seconds)
+        budget = _wait_budget(timeout, _limit("command_timeout", 45))
+        try:
+            job = await asyncio.to_thread(
+                jobs.registry.start, command, working_dir, "run_command"
+            )
+        except Exception as exc:  # noqa: BLE001
+            return f"Error: {exc}"
+        await _wait(job, budget)
 
-        if result.get("error"):
-            return f"Error: {result['error']}"
+        if job.running:
+            logs.log("terminal", f"job {job.id} still running after {budget}s, left in background")
+            return "\n".join([
+                f"$ {command}",
+                f"(cwd: {working_dir})",
+                f"still running after {budget}s, so it was left running in the "
+                f"background as job {job.id} (nothing was stopped).",
+                f"Next: wait_process(job_id=\"{job.id}\") to wait for it, or "
+                f"stop_process(job_id=\"{job.id}\") if it is stuck.",
+                _format_job_output(job, tail=30),
+            ])
 
-        cap = _limit("max_output_chars", 100000)
-        parts = [f"$ {command}", f"(cwd: {working_dir})"]
-        if seconds < requested:
-            parts.append(
-                f"note: timeout lowered from {requested}s to the {seconds}s "
-                "maximum; use start_process for work that takes longer"
-            )
-        if result.get("timed_out"):
-            logs.log("terminal", f"Command timed out after {seconds}s", level="warn")
-            ending = result.get("ending") or "killed"
-            note = (
-                f"timed out after {seconds} seconds - the command and its "
-                f"child processes were stopped ({ending})."
-            )
-            if ending != "stopped cleanly":
-                note += (
-                    " It did not shut down on request, so whatever it was "
-                    "writing may be half-finished; re-running the same "
-                    "command normally completes it."
-                )
-            note += (
-                " If it simply needs more time, run it with start_process "
-                "and read the output with get_output."
-            )
-            parts.append(note)
+        lines, exit_code = await asyncio.to_thread(_collect, job)
+        parts = [f"$ {command}", f"(cwd: {working_dir})", f"exit code: {exit_code}"]
+        if lines:
+            text = "\n".join(lines).rstrip()
+            parts += ["--- output ---", _clip(text, _limit("max_output_chars", 100000))]
         else:
-            parts.append(f"exit code: {result['exit_code']}")
-
-        stdout = result.get("stdout") or ""
-        stderr = result.get("stderr") or ""
-        if stdout:
-            parts += ["--- stdout ---", _truncate(stdout.rstrip(), cap)]
-        if stderr:
-            parts += ["--- stderr ---", _truncate(stderr.rstrip(), cap)]
-        if not stdout and not stderr:
             parts.append("(no output)")
         return "\n".join(parts)
 
     @mcp.tool()
     def start_process(command: str, cwd: str = "") -> str:
-        """Start a long-running command in the background and return at once.
+        """Start a command in the background and return at once.
 
-        This is the right tool for installs, builds, test suites, linters on
-        a big tree, and dev servers. The command keeps running on the user's
-        machine after this call returns; read its output with get_output and
-        end it with stop_process.
+        For dev servers, watchers, and anything you want to keep running
+        while you do other work. Read its output with wait_process or
+        get_output, end it with stop_process. (A slow build or install can
+        also simply go through run_command: it backgrounds itself.)
 
         Args:
             command: Command line to execute.
-            cwd: Working directory, absolute or relative to the project.
-                Defaults to the project root.
+            cwd: Working directory. Use an absolute path. Defaults to the
+                active project root.
         """
         if not command.strip():
             return "Error: command is required."
+        blocked = guard.check(command)
+        if blocked:
+            logs.log("terminal", f"Blocked: {command}", level="warn")
+            return "Error: " + blocked
         try:
-            working_dir = paths.resolve(cwd, must_exist=True)
-        except Exception as exc:  # noqa: BLE001
-            return f"Error: {exc}"
-        if not working_dir.is_dir():
-            return f"Error: not a directory: {working_dir}"
-
-        try:
+            working_dir = _working_dir(cwd)
             job = jobs.registry.start(command, working_dir)
         except Exception as exc:  # noqa: BLE001
             return f"Error: {exc}"
@@ -236,20 +215,21 @@ def register(mcp) -> None:
             f"Started job {job.id} (pid {job.pid})",
             f"$ {command}",
             f"(cwd: {working_dir})",
-            "Read the output with get_output(\"" + job.id + "\"). Give it a few "
-            "seconds before the first read, and keep reading from the "
-            "returned next offset until the job reports that it finished.",
+            f"Next: wait_process(job_id=\"{job.id}\"), optionally with until= "
+            "a regex such as \"ready|listening|error\" for a server.",
         ])
 
     @mcp.tool()
-    def get_output(job_id: str, offset: int = 0, limit: int = 200) -> str:
-        """Read the output of a background job started with start_process.
+    def get_output(job_id: str, offset: int = 0, limit: int = 200, tail: int = 0) -> str:
+        """Read the output of a background job, right now.
 
         Args:
-            job_id: Id returned by start_process.
+            job_id: Id returned by start_process or run_command.
             offset: First output line to return, 0-based. Pass the offset
                 from the previous read to continue where you stopped.
             limit: How many lines to return at most.
+            tail: Return only the last N lines instead - the useful part of
+                a long build or test log.
         """
         job = jobs.registry.get(job_id)
         if job is None:
@@ -257,31 +237,32 @@ def register(mcp) -> None:
                 f"Error: no job '{job_id}'. Call list_processes to see the "
                 "jobs this session knows about."
             )
-        return _format_job_output(job, offset, limit)
+        return _format_job_output(job, offset, limit, tail)
 
     @mcp.tool()
     async def wait_process(
-        job_id: str, seconds: int = 20, offset: int = 0, limit: int = 200
+        job_id: str,
+        seconds: int = 20,
+        offset: int = 0,
+        limit: int = 200,
+        until: str = "",
+        tail: int = 0,
     ) -> str:
-        """Pause for a background job to progress, then report its output.
+        """Wait for a background job, then report its output.
 
-        Use this instead of calling get_output back-to-back while a job is
-        still running: it waits here instead of spending a whole extra tool
-        call to learn "nothing new yet". If the job finishes early, this
-        returns immediately with the result instead of waiting out the full
-        time.
-
-        A tool call cannot wait past about a minute before Notion's client
-        gives up, so seconds is capped comfortably under that. If the job is
-        still running when this returns, just call it again - repeatedly, if
-        one wait is not enough.
+        Returns as soon as the job finishes, or as soon as a new output
+        line matches `until`, so you never wait longer than needed. One
+        call replaces a sleep plus a poll. If the job is still running
+        when the wait runs out, just call this again.
 
         Args:
-            job_id: Id returned by start_process.
-            seconds: How long to wait if the job is still running, at most
-                the configured ceiling. 0 uses a short default.
-            offset: First output line to return, 0-based, same as get_output.
+            job_id: Id returned by start_process or run_command.
+            seconds: Longest wait, capped at 50 (the client's request
+                window). 0 uses 20.
+            offset: First output line to return and to search, 0-based.
             limit: How many lines to return at most.
+            until: Optional regex, e.g. "ready|listening|error|failed".
+            tail: Return only the last N lines.
         """
         job = jobs.registry.get(job_id)
         if job is None:
@@ -289,22 +270,25 @@ def register(mcp) -> None:
                 f"Error: no job '{job_id}'. Call list_processes to see the "
                 "jobs this session knows about."
             )
-
-        ceiling = _limit("wait_seconds_max", 50)
-        budget = max(1, min(seconds or 20, ceiling))
-        loop = asyncio.get_event_loop()
-        deadline = loop.time() + budget
-        while job.running and loop.time() < deadline:
-            await asyncio.sleep(0.5)
-
-        return _format_job_output(job, offset, limit)
+        pattern = None
+        if until:
+            try:
+                pattern = re.compile(until, re.IGNORECASE)
+            except re.error as exc:
+                return f"Error: until is not a valid regex: {exc}"
+        matched = await _wait(job, _wait_budget(seconds, 20), pattern, offset)
+        report = _format_job_output(job, offset, limit, tail)
+        if pattern is not None and job.running:
+            note = "matched until=" if matched else "no line matched until="
+            report = f"[{note}{until!r}]\n" + report
+        return report
 
     @mcp.tool()
     def stop_process(job_id: str) -> str:
         """Stop a background job and every process it spawned.
 
         Args:
-            job_id: Id returned by start_process.
+            job_id: Id returned by start_process or run_command.
         """
         job = jobs.registry.get(job_id)
         if job is None:
@@ -325,20 +309,21 @@ def register(mcp) -> None:
 
     @mcp.tool()
     def list_processes() -> str:
-        """List the background jobs started in this session, oldest first."""
+        """List the background jobs this app is tracking, oldest first."""
         found = jobs.registry.list_jobs()
         if not found:
-            return "No background jobs. Start one with start_process."
+            return "No background jobs."
         lines = [f"{len(found)} job(s), {jobs.registry.running_count()} still running:"]
         lines += ["  " + job.status_line() for job in found]
         return "\n".join(lines)
 
     @mcp.tool()
     def get_active_project() -> str:
-        """Report which project the file and command tools are working in.
+        """Report the default project: where relative paths and a missing cwd resolve.
 
-        Call this at the start of a session to confirm you are in the right
-        project before touching anything.
+        Prefer absolute paths anyway; the user may run several agents on
+        different projects at once, and this default is shared by all of
+        them.
         """
         try:
             project = projects.active_project()
@@ -354,94 +339,117 @@ def register(mcp) -> None:
         if selected_at:
             stamp = datetime.fromtimestamp(selected_at).strftime("%Y-%m-%d %H:%M:%S")
             lines.append(f"selected at: {stamp}")
-
+        outside = bool(settings.get("security", "allow_outside_project", default=False))
+        lines.append(
+            "access outside this folder: "
+            + ("allowed (use absolute paths)" if outside else "refused")
+        )
         others = [p for p in projects.list_projects() if p["id"] != project["id"]]
         if others:
             lines.append(
                 "other registered projects: "
-                + ", ".join(f"{p['name']} ({p['id']})" for p in others)
+                + ", ".join(f"{p['name']} ({p['root']})" for p in others)
             )
-        lines.append(
-            "The active project is chosen by the user in the control panel. "
-            "If it is not the one you expect, stop and ask before making changes."
-        )
         return "\n".join(lines)
 
     @mcp.tool()
-    def list_skills(query: str = "") -> str:
-        """List the available coding skills.
+    def list_skills(query: str = "", group: str = "", project: str = "") -> str:
+        """List the available skills (instructions for specific kinds of work).
 
-        The skills folder is re-scanned on every call, so new skills appear
-        automatically.
+        Without arguments: the bridge's own skills with descriptions, plus
+        skill groups collapsed to one line each. Re-scanned on every call.
 
         Args:
-            query: Optional case-insensitive filter on name and description.
+            query: Case-insensitive filter on name and description, across
+                every group.
+            group: Show the skills of one group, e.g. "design".
+            project: A project folder; its .agents/skills, .claude/skills
+                and .opencode/skills are listed too.
         """
-        found = skills.discover()
+        try:
+            found = skills.discover(project or None)
+        except Exception as exc:  # noqa: BLE001
+            return f"Error: {exc}"
         if not found:
             return f"No skills found in {skills.skills_root()}"
 
         needle = query.strip().lower()
+        wanted = group.strip().strip("/").lower()
         if needle:
             found = [
                 s for s in found
                 if needle in s["name"].lower() or needle in s["description"].lower()
+                or needle in s["group"].lower()
             ]
             if not found:
-                return (
-                    f"No skills match '{query}'. "
-                    "Call list_skills with no query to see all."
-                )
+                return f"No skills match '{query}'. Call list_skills with no query to see all."
+            return "\n".join([f"{len(found)} skill(s) matching '{query}':", ""]
+                             + [skills.describe(s) for s in found])
+        if wanted:
+            found = [s for s in found if s["group"].lower() == wanted]
+            if not found:
+                return f"No group '{group}'. Call list_skills with no arguments to see groups."
+            return "\n".join([f"Group {wanted}: {len(found)} skill(s)", ""]
+                             + [skills.describe(s) for s in found])
 
-        lines = [f"Found {len(found)} skill(s) in {skills.skills_root()}:", ""]
-        for skill in found:
-            description = " ".join(skill["description"].split())
-            if len(description) > 220:
-                description = description[:217] + "..."
-            lines.append(
-                f"- {skill['slug']}: {description}" if description else f"- {skill['slug']}"
-            )
+        core = [s for s in found if not s["group"] and s["origin"] == "bridge"]
+        local = [s for s in found if s["origin"] == "project"]
+        groups: dict = {}
+        for s in found:
+            if s["group"] and s["origin"] == "bridge":
+                groups.setdefault(s["group"], []).append(s["slug"])
+
+        lines = [f"Skills in {skills.skills_root()}:", ""]
+        lines += [skills.describe(s) for s in core] or ["(no top-level skills)"]
+        if groups:
+            lines += ["", "Groups (list_skills(group=...) shows descriptions):"]
+            for name, members in sorted(groups.items()):
+                preview = ", ".join(members[:6]) + (", ..." if len(members) > 6 else "")
+                lines.append(f"- {name}/  {len(members)} skills: {preview}")
+        if local:
+            lines += ["", f"Project skills ({project}):"]
+            lines += [skills.describe(s) for s in local]
         return "\n".join(lines)
 
     @mcp.tool()
-    def get_skill(name: str) -> str:
-        """Fetch the full text of a coding skill by name.
+    def get_skill(name: str, project: str = "") -> str:
+        """Fetch the full text of a skill, plus the list of its bundled files.
 
         Args:
-            name: Skill name, for example "clean-code".
+            name: Skill name, e.g. "mcp-coding-agent" or "design/impeccable".
+            project: Project folder, to also search its own skills.
         """
         if not name.strip():
             return "Error: a skill name is required."
 
-        skill, candidates = skills.find(name)
+        skill, candidates = skills.find(name, project or None)
         if skill is None:
             if not candidates:
                 return f"No skills found in {skills.skills_root()}"
-            names = ", ".join(sorted(c["slug"] for c in candidates))
+            names = ", ".join(sorted(skills.qualified(c) for c in candidates[:40]))
             return f"No single match for '{name}'. Available or close: {names}"
 
         try:
-            with open(skill["file"], "r", encoding="utf-8") as fh:
-                content = fh.read()
+            content = Path(skill["file"]).read_text(encoding="utf-8")
         except OSError as exc:
             return f"Error reading skill '{skill['slug']}': {exc}"
 
         header = [f"# Skill: {skill['name']}", f"(source: {skill['file']})"]
-        if skill.get("references"):
-            header += ["", "Bundled reference files (read them if you need them):"]
-            header += [f"  - {ref}" for ref in skill["references"]]
+        bundled = skills.bundled_files(skill)
+        if bundled:
+            header += ["", f"Bundled files under {skill['dir']} (read them only if needed):"]
+            header += [f"  - {ref}" for ref in bundled]
         header += ["", "=" * 60, ""]
         return "\n".join(header) + content
 
     @mcp.tool()
     def notify_user(message: str = "") -> str:
-        """Notify the user via Telegram that the agent's task is finished.
+        """Send the user a short Telegram message that the task is finished.
 
-        Call this tool at the very end of your work when all files and commands
-        are completed. You can provide a brief, professional summary of what was accomplished.
+        Call it once, at the very end, when all files and commands are done.
 
         Args:
-            message: Optional concise summary or note for the user (1-3 sentences).
+            message: Concise summary of what was accomplished (1-3 sentences).
         """
         cfg = settings.get("notifications", default={}) or {}
         if not cfg.get("notify_tool_enabled", True):

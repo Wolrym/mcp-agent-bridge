@@ -38,6 +38,9 @@ DEFAULTS: dict[str, Any] = {
         "files_port": 9500,
         "terminal_port": 9501,
         "http_path": "/mcp",
+        # Some clients open a new MCP session for every call and never
+        # close it; sessions idle this long are dropped. 0 keeps them all.
+        "session_idle_seconds": 900,
     },
     "tunnel": {
         "enabled": False,
@@ -50,15 +53,20 @@ DEFAULTS: dict[str, Any] = {
         "terminal_hostname": "",
     },
     "limits": {
-        "command_timeout": 60,
-        # A tool call is an HTTP request and the client gives up after about
-        # a minute, so waiting longer than this inside one call is pointless.
-        # Anything slower belongs in a background job.
-        "command_timeout_max": 120,
+        # How long run_command waits before leaving a command running in
+        # the background. A tool call is an HTTP request and the client
+        # gives up after about a minute, so the code never waits longer
+        # than 50s per call whatever these say.
+        "command_timeout": 45,
+        "command_timeout_max": 50,
         "max_output_chars": 100000,
         "max_read_bytes": 5000000,
         "max_read_lines": 900,
         "max_results": 300,
+        # read_file returns pictures inline up to this size.
+        "max_image_bytes": 5000000,
+        # Ceiling for pack_files / unpack_files archives.
+        "max_pack_mb": 25,
         "max_backup_bytes": 20000000,
         "backup_retention_days": 14,
         # Ceiling for wait_process. A tool call is still one HTTP request,
@@ -66,7 +74,17 @@ DEFAULTS: dict[str, Any] = {
         # rather than at it.
         "wait_seconds_max": 50,
     },
-    "security": {"allow_outside_project": False},
+    "security": {
+        "allow_outside_project": False,
+        # Refuse a short list of commands that wreck a machine or kill this
+        # app (format, diskpart, taskkill /im python ...). It is a seatbelt
+        # against accidents, not a sandbox: run_command can still do
+        # anything the user can.
+        "block_dangerous_commands": True,
+        # File tools refuse to touch config/settings.json (it holds the
+        # token) unless this is switched on.
+        "allow_settings_edit": False,
+    },
     "backups": {"enabled": False},
     # GUI-only preferences. `autostart` brings the servers and the tunnel up
     # as soon as the panel opens, so the machine is reachable without a

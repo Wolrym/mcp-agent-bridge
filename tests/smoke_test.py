@@ -5,10 +5,12 @@ then checks that:
 
   1. an unauthenticated request is rejected with 401
   2. an authenticated initialize handshake succeeds
-  3. both servers expose the expected tool set
+  3. both servers expose the expected tool set, sent without a
+     structured duplicate
+  4. /health answers without a token and reveals no paths
 
 It never touches the real settings file and never starts the tunnel, so it
-is safe to run while the old gateway is live.
+is safe to run while the real panel is live.
 
     python tests/smoke_test.py
 """
@@ -131,6 +133,13 @@ def exercise(name: str, port: int, expected_tools: set) -> None:
     missing = expected_tools - tools
     check("exposes the expected tools", not missing,
           f"missing {sorted(missing)}" if missing else "")
+    doubled = [t["name"] for t in payload.get("result", {}).get("tools", []) if t.get("outputSchema")]
+    check("no tool doubles its result as structured output", not doubled, ", ".join(doubled))
+
+    health = httpx.get(f"http://127.0.0.1:{port}/health", timeout=10)
+    check("/health answers without a token", health.status_code == 200, f"got {health.status_code}")
+    check("/health reveals no paths", str(REPO_ROOT) not in health.text and "root" not in health.text,
+          health.text[:120])
 
 
 def main() -> int:
@@ -144,10 +153,13 @@ def main() -> int:
         exercise("Files System", FILES_PORT, {
             "list_directory", "read_file", "read_multiple_files", "write_file",
             "edit_file", "create_directory", "move_file", "delete_file",
-            "search_files", "grep", "get_file_info",
+            "search_files", "grep", "get_file_info", "list_changes", "undo_change",
+            "pack_files", "unpack_files",
         })
         exercise("Terminal", TERMINAL_PORT, {
-            "run_command", "get_active_project", "list_skills", "get_skill",
+            "run_command", "start_process", "get_output", "wait_process",
+            "stop_process", "list_processes", "get_active_project", "list_skills",
+            "get_skill", "notify_user",
         })
     finally:
         supervisor.stop()

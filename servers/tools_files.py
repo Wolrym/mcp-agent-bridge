@@ -11,23 +11,42 @@ Two behaviours worth knowing about:
   flooding the conversation.
 * Changes are reversible. write_file, edit_file, move_file and delete_file
   snapshot the previous state first, so undo_change can put it back.
+
+Edits keep a file's line endings (CRLF stays CRLF, LF stays LF) and its
+UTF-8 BOM, and refuse files that are not UTF-8 instead of silently
+replacing their non-UTF-8 bytes.
 """
 from __future__ import annotations
 
+import base64
+import binascii
 import fnmatch
+import hashlib
+import io
 import os
 import shutil
+import zipfile
 from datetime import datetime
 from pathlib import Path
 
-from core import backups, logs, notifier, paths, projects
-from core.config import settings
+from mcp.server.fastmcp import Image
 
+from core import backups, logs, paths, projects
+from core.config import SETTINGS_PATH, settings
+from servers.common import install
+
+# Folders no search should descend into. Other dot-folders (.github,
+# .agents, .claude) are searched: they often hold exactly what you need.
 SKIP_DIRS = {
     ".git", ".hg", ".svn", "node_modules", "__pycache__", ".venv", "venv",
-    ".mypy_cache", ".pytest_cache", ".idea", ".vscode", "dist", "build",
-    backups.DIR_NAME,
+    ".mypy_cache", ".pytest_cache", ".ruff_cache", ".tox", ".idea", ".vscode",
+    ".next", ".nuxt", ".turbo", ".cache", ".parcel-cache", ".gradle",
+    ".mcp-runs", "dist", "build", backups.DIR_NAME,
 }
+
+IMAGE_TYPES = {".png": "png", ".jpg": "jpeg", ".jpeg": "jpeg", ".gif": "gif", ".webp": "webp"}
+MAX_LINE_CHARS = 2000
+BOM = b"\xef\xbb\xbf"
 
 
 def _limit(name: str, fallback: int) -> int:
@@ -49,6 +68,57 @@ def _read_text(path: Path) -> str:
     return path.read_text(encoding="utf-8", errors="replace")
 
 
+def _load_for_edit(path: Path) -> tuple:
+    """Read a file for editing: (text with \\n newlines, newline, has_bom).
+
+    Raises ValueError for a file that is not valid UTF-8, because writing
+    it back would destroy every byte that did not decode.
+    """
+    max_bytes = _limit("max_read_bytes", 5_000_000)
+    raw = path.read_bytes()
+    if len(raw) > max_bytes:
+        raise ValueError(f"File is {len(raw)} bytes, over the {max_bytes} byte limit.")
+    has_bom = raw.startswith(BOM)
+    if has_bom:
+        raw = raw[len(BOM):]
+    try:
+        text = raw.decode("utf-8")
+    except UnicodeDecodeError as exc:
+        raise ValueError(
+            f"{path} is not UTF-8 (byte {exc.start}); editing it here would "
+            "corrupt it. Convert it to UTF-8 first, or change it with a "
+            "script that knows its encoding."
+        ) from None
+    newline = "\r\n" if "\r\n" in text else "\n"
+    return text.replace("\r\n", "\n"), newline, has_bom
+
+
+def _save(path: Path, text: str, newline: str = "\n", has_bom: bool = False) -> None:
+    """Write text with exactly the given line endings - no platform translation."""
+    text = text.replace("\r\n", "\n")
+    if newline != "\n":
+        text = text.replace("\n", newline)
+    data = text.encode("utf-8")
+    path.write_bytes(BOM + data if has_bom else data)
+
+
+def _guard_write(path: Path) -> None:
+    """Refuse to let agents rewrite the bridge's own settings (token, ports)."""
+    if settings.get("security", "allow_settings_edit", default=False):
+        return
+    if path.resolve() == Path(SETTINGS_PATH).resolve():
+        raise PermissionError(
+            "the bridge's settings file holds its auth token and is protected; "
+            "the user changes it from the control panel."
+        )
+
+
+def _clip_line(line: str) -> str:
+    if len(line) <= MAX_LINE_CHARS:
+        return line
+    return line[:MAX_LINE_CHARS] + f" ...[{len(line) - MAX_LINE_CHARS} more chars on this line]"
+
+
 def _page(text: str, path: Path, offset: int, limit: int) -> str:
     """Return a slice of `text` by line, with a header when it is partial.
 
@@ -66,13 +136,26 @@ def _page(text: str, path: Path, offset: int, limit: int) -> str:
             f"({total} lines)."
         )
 
-    chunk = lines[start - 1 : start - 1 + cap]
+    # A line budget alone does not bound the reply: one minified file can
+    # be a single 5 MB line. Long lines are clipped and the page stops at
+    # a character budget too.
+    budget = _limit("max_output_chars", 100000)
+    chunk, used, clipped = [], 0, False
+    for line in lines[start - 1 : start - 1 + cap]:
+        shown = _clip_line(line)
+        clipped = clipped or shown is not line
+        if chunk and used + len(shown) > budget:
+            break
+        chunk.append(shown)
+        used += len(shown) + 1
     end = start - 1 + len(chunk)
     body = "\n".join(chunk)
 
     partial = start > 1 or end < total
-    if not partial:
+    if not partial and not clipped:
         return text
+    if not partial:
+        return body
 
     header = f"[{path}: lines {start}-{end} of {total}]"
     footer = ""
@@ -95,7 +178,7 @@ def _is_probably_binary(path: Path) -> bool:
 def _walk(root: Path):
     """Yield files under `root`, skipping noisy directories."""
     for current, dirnames, filenames in os.walk(root):
-        dirnames[:] = [d for d in dirnames if d not in SKIP_DIRS and not d.startswith(".")]
+        dirnames[:] = [d for d in dirnames if d not in SKIP_DIRS]
         for filename in filenames:
             yield Path(current) / filename
 
@@ -106,20 +189,7 @@ def _undo_hint(change_id: str) -> str:
 
 def register(mcp) -> None:
     """Attach every file tool to the given FastMCP instance."""
-    raw_tool = mcp.tool
-
-    def tracked_tool(*args, **kwargs):
-        decorator = raw_tool(*args, **kwargs)
-        def wrapper(fn):
-            import functools
-            @functools.wraps(fn)
-            def wrapped(*f_args, **f_kwargs):
-                notifier.record_tool_activity(fn.__name__)
-                return fn(*f_args, **f_kwargs)
-            return decorator(wrapped)
-        return wrapper
-
-    mcp.tool = tracked_tool
+    install(mcp, "files")
 
     @mcp.tool()
     def list_directory(path: str = ".") -> str:
@@ -137,7 +207,9 @@ def register(mcp) -> None:
             return f"Error: not a directory: {target}"
 
         entries = []
-        for child in sorted(target.iterdir(), key=lambda p: (p.is_file(), p.name.lower())):
+        children = sorted(target.iterdir(), key=lambda p: (p.is_file(), p.name.lower()))
+        cap = _limit("max_results", 300)
+        for child in children[:cap]:
             if child.is_dir():
                 entries.append(f"[DIR ] {child.name}")
             else:
@@ -146,15 +218,21 @@ def register(mcp) -> None:
                 except OSError:
                     size = 0
                 entries.append(f"[FILE] {child.name} ({size} bytes)")
+        if len(children) > cap:
+            entries.append(f"... {len(children) - cap} more entries not shown")
         header = f"{target}"
         return header + "\n" + ("\n".join(entries) if entries else "(empty)")
 
     @mcp.tool()
-    def read_file(path: str, offset: int = 0, limit: int = 0) -> str:
-        """Read a text file, in parts when it is long.
+    def read_file(path: str, offset: int = 0, limit: int = 0):
+        """Read a text file, in parts when it is long; images come back as images.
 
         Short files come back whole. Longer ones are cut to a line budget
         and the result says which lines you got and where to continue.
+        PNG, JPEG, GIF and WebP files are returned as an image you can
+        look at. Other binary files (PDF, video, archives) cannot be read
+        here; copy them to your own workspace with pack_files if you have
+        one.
 
         Args:
             path: File to read, absolute or relative to the active project.
@@ -165,8 +243,23 @@ def register(mcp) -> None:
             target = paths.resolve(path, must_exist=True)
             if target.is_dir():
                 return f"Error: '{target}' is a directory. Use list_directory."
+            kind = IMAGE_TYPES.get(target.suffix.lower())
+            if kind:
+                size = target.stat().st_size
+                cap = _limit("max_image_bytes", 5_000_000)
+                if size > cap:
+                    return (
+                        f"Error: '{target}' is a {size} byte image, over the "
+                        f"{cap} byte limit. Use pack_files, or a smaller copy."
+                    )
+                return Image(data=target.read_bytes(), format=kind)
             if _is_probably_binary(target):
-                return f"Error: '{target}' looks like a binary file."
+                size = target.stat().st_size
+                return (
+                    f"Error: '{target}' is a binary file ({size} bytes). Text "
+                    "tools cannot show it; pack_files copies it to your own "
+                    "workspace if you have one."
+                )
             return _page(_read_text(target), target, offset, limit)
         except Exception as exc:  # noqa: BLE001
             return _error(exc)
@@ -197,12 +290,13 @@ def register(mcp) -> None:
                 chunks.append(f"===== {raw} =====\nError: {exc}")
         return "\n\n".join(chunks)
 
-    @mcp.tool()
+    @mcp.tool(exclusive=True)
     def write_file(path: str, content: str) -> str:
         """Create a file or replace its entire contents.
 
         Use edit_file for changing part of an existing file. The previous
-        contents are kept for undo_change.
+        contents are kept for undo_change. Replacing a file keeps its line
+        ending style and BOM; a new file gets the line endings you send.
 
         Args:
             path: File to write, absolute or relative to the active project.
@@ -210,10 +304,18 @@ def register(mcp) -> None:
         """
         try:
             target = paths.resolve(path)
+            _guard_write(target)
             target.parent.mkdir(parents=True, exist_ok=True)
             existed = target.exists()
+            newline = "\r\n" if "\r\n" in content else "\n"
+            has_bom = False
+            if existed and target.is_file():
+                try:
+                    _, newline, has_bom = _load_for_edit(target)
+                except (ValueError, OSError):
+                    pass
             entry = backups.record_before(backups.WRITE, target)
-            target.write_text(content, encoding="utf-8")
+            _save(target, content, newline, has_bom)
         except Exception as exc:  # noqa: BLE001
             return _error(exc)
 
@@ -222,7 +324,7 @@ def register(mcp) -> None:
         logs.log("files", f"{verb} {target}")
         return f"{verb} {target} ({len(content)} chars){_undo_hint(change_id)}"
 
-    @mcp.tool()
+    @mcp.tool(exclusive=True)
     def edit_file(
         path: str,
         old_string: str,
@@ -247,10 +349,13 @@ def register(mcp) -> None:
             return "Error: old_string must not be empty."
         try:
             target = paths.resolve(path, must_exist=True)
-            original = _read_text(target)
+            _guard_write(target)
+            original, newline, has_bom = _load_for_edit(target)
         except Exception as exc:  # noqa: BLE001
             return _error(exc)
 
+        old_string = old_string.replace("\r\n", "\n")
+        new_string = new_string.replace("\r\n", "\n")
         occurrences = original.count(old_string)
         if occurrences == 0:
             return (
@@ -271,7 +376,7 @@ def register(mcp) -> None:
             )
         try:
             entry = backups.record_before(backups.EDIT, target)
-            target.write_text(updated, encoding="utf-8")
+            _save(target, updated, newline, has_bom)
         except Exception as exc:  # noqa: BLE001
             return _error(exc)
 
@@ -298,7 +403,7 @@ def register(mcp) -> None:
             return _error(exc)
         return f"Directory ready: {target}"
 
-    @mcp.tool()
+    @mcp.tool(exclusive=True)
     def move_file(source: str, destination: str, overwrite: bool = False) -> str:
         """Move or rename a file or directory.
 
@@ -310,6 +415,8 @@ def register(mcp) -> None:
         try:
             src = paths.resolve(source, must_exist=True)
             dst = paths.resolve(destination)
+            _guard_write(src)
+            _guard_write(dst)
             if dst.exists() and not overwrite:
                 return f"Error: destination already exists: {dst}"
             dst.parent.mkdir(parents=True, exist_ok=True)
@@ -322,7 +429,7 @@ def register(mcp) -> None:
         logs.log("files", f"Moved {src} -> {dst}")
         return f"Moved {src} -> {dst}{_undo_hint(change_id)}"
 
-    @mcp.tool()
+    @mcp.tool(exclusive=True)
     def delete_file(path: str, recursive: bool = False) -> str:
         """Delete a file, or a directory when recursive is set.
 
@@ -335,6 +442,7 @@ def register(mcp) -> None:
         """
         try:
             target = paths.resolve(path)
+            _guard_write(target)
             if not target.exists() and not target.is_symlink():
                 return f"Error: path does not exist: {target}"
             if target == projects.active_root():
@@ -394,7 +502,7 @@ def register(mcp) -> None:
             )
         return "\n".join(lines)
 
-    @mcp.tool()
+    @mcp.tool(exclusive=True)
     def undo_change(change_id: str = "", force: bool = False) -> str:
         """Undo a file change recorded by these tools.
 
@@ -486,7 +594,7 @@ def register(mcp) -> None:
                 with file.open("r", encoding="utf-8", errors="replace") as fh:
                     for number, line in enumerate(fh, start=1):
                         if regex.search(line):
-                            hits.append(f"{file}:{number}: {line.rstrip()}")
+                            hits.append(f"{file}:{number}: {_clip_line(line.rstrip())}")
                             if len(hits) >= cap:
                                 truncated = True
                                 break
@@ -501,6 +609,120 @@ def register(mcp) -> None:
         if truncated:
             header += f" (stopped at the {cap} result limit)"
         return header + "\n" + "\n".join(hits)
+
+    @mcp.tool()
+    def pack_files(paths_to_pack: list, max_mb: int = 8) -> str:
+        """Pack files from this PC as a base64 zip, to copy them into your own workspace.
+
+        For agents that have their own sandbox or computer: it carries what
+        text tools cannot - images, PDFs, office files, archives - or a
+        whole folder you want to process with your own tools. Decode the
+        block between the BEGIN/END markers and unzip it. Folders are
+        packed recursively, skipping .git, node_modules and similar.
+
+        Args:
+            paths_to_pack: Files and folders. Use absolute paths.
+            max_mb: Refuse when the zip would be larger than this.
+        """
+        if not paths_to_pack:
+            return "Error: provide at least one path."
+        cap = max(1, min(int(max_mb or 8), _limit("max_pack_mb", 25))) * 1_000_000
+        buffer = io.BytesIO()
+        count = 0
+        try:
+            with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as archive:
+                for raw in paths_to_pack:
+                    target = paths.resolve(str(raw), must_exist=True)
+                    if target.is_file():
+                        archive.write(target, target.name)
+                        count += 1
+                    else:
+                        for file in _walk(target):
+                            archive.write(file, str(Path(target.name) / file.relative_to(target)))
+                            count += 1
+                            if buffer.tell() > cap:
+                                break
+                    if buffer.tell() > cap:
+                        return (
+                            f"Error: the zip passed {cap // 1_000_000} MB. Pack "
+                            "fewer files, or raise max_mb."
+                        )
+        except Exception as exc:  # noqa: BLE001
+            return _error(exc)
+        data = buffer.getvalue()
+        digest = hashlib.sha256(data).hexdigest()[:16]
+        logs.log("files", f"Packed {count} file(s), {len(data)} bytes")
+        return (
+            f"zip: {count} file(s), {len(data)} bytes, sha256 {digest}...\n"
+            "-----BEGIN BASE64 ZIP-----\n"
+            + base64.b64encode(data).decode("ascii")
+            + "\n-----END BASE64 ZIP-----"
+        )
+
+    @mcp.tool(exclusive=True)
+    def unpack_files(data: str, destination: str, overwrite: bool = False) -> str:
+        """Unpack a base64 zip from your own workspace into a folder on this PC.
+
+        The way back for pack_files: generated images, icons, documents, or
+        a batch of files produced in your sandbox. Every file it replaces
+        is kept for undo_change. If your client can pass tool arguments
+        from a file, use that for big payloads instead of pasting them.
+
+        Args:
+            data: Base64 of a zip archive (BEGIN/END markers are allowed).
+            destination: Folder to extract into. Use an absolute path.
+            overwrite: Replace existing files. Without it nothing is written
+                when any file already exists.
+        """
+        body = data.strip()
+        if "-----BEGIN" in body:
+            body = body.split("-----", 2)[-1].split("\n", 1)[-1]
+            body = body.split("-----END", 1)[0]
+        try:
+            raw = base64.b64decode("".join(body.split()), validate=True)
+            archive = zipfile.ZipFile(io.BytesIO(raw))
+            root = paths.resolve(destination)
+        except (binascii.Error, zipfile.BadZipFile, ValueError) as exc:
+            return f"Error: data is not a base64 zip: {exc}"
+        except Exception as exc:  # noqa: BLE001
+            return _error(exc)
+
+        limit = _limit("max_pack_mb", 25) * 1_000_000
+        members = [m for m in archive.infolist() if not m.is_dir()]
+        if sum(m.file_size for m in members) > limit:
+            return f"Error: the archive unpacks to more than {limit // 1_000_000} MB."
+        targets = []
+        for member in members:
+            target = (root / member.filename).resolve()
+            if not paths.is_inside(root.resolve(), target):
+                return f"Error: refusing '{member.filename}': it points outside {root}."
+            try:
+                _guard_write(target)
+            except Exception as exc:  # noqa: BLE001
+                return _error(exc)
+            targets.append((member, target))
+        clashes = [str(t) for _, t in targets if t.exists()]
+        if clashes and not overwrite:
+            shown = "\n".join(clashes[:20])
+            return (
+                f"Error: {len(clashes)} file(s) already exist; nothing was written. "
+                f"Pass overwrite=true to replace them:\n{shown}"
+            )
+        undo_ids = []
+        for member, target in targets:
+            target.parent.mkdir(parents=True, exist_ok=True)
+            entry = backups.record_before(backups.WRITE, target)
+            target.write_bytes(archive.read(member))
+            change_id = backups.record_after(entry, f"Unpacked {target}")
+            if change_id:
+                undo_ids.append(change_id)
+        logs.log("files", f"Unpacked {len(targets)} file(s) into {root}")
+        result = f"Unpacked {len(targets)} file(s) into {root}"
+        if clashes:
+            result += f" ({len(clashes)} replaced)"
+        if undo_ids:
+            result += f". Undo ids: {', '.join(undo_ids[:20])}"
+        return result
 
     @mcp.tool()
     def get_file_info(path: str) -> str:
@@ -532,9 +754,11 @@ def register(mcp) -> None:
                 lines.append(f"entries: {len(list(target.iterdir()))}")
             except OSError:
                 pass
-        if not target.is_dir():
+        if not target.is_dir() and info.st_size <= _limit("max_read_bytes", 5_000_000) \
+                and not _is_probably_binary(target):
             try:
-                text_lines = sum(1 for _ in target.open("r", encoding="utf-8", errors="replace"))
+                with target.open("rb") as fh:
+                    text_lines = sum(1 for _ in fh)
                 lines.append(f"lines: {text_lines}")
             except OSError:
                 pass

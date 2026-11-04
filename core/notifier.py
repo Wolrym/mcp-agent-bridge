@@ -167,19 +167,33 @@ class _ActivityTracker:
             if len(self._last_tools) > 15:
                 self._last_tools.pop(0)
 
-            # Cancel existing idle timer
-            if self._timer:
-                self._timer.cancel()
-                self._timer = None
+            self._reschedule()
 
-            # Schedule new idle timer if idle notifications are active
-            cfg = settings.get("notifications", default={}) or {}
-            if is_enabled() and cfg.get("notify_on_idle", True):
-                idle_secs = int(cfg.get("idle_timeout_seconds", 60) or 60)
-                if idle_secs > 0:
-                    self._timer = threading.Timer(idle_secs, self._on_idle_timeout)
-                    self._timer.daemon = True
-                    self._timer.start()
+    def touch(self) -> None:
+        """Restart the idle countdown without counting a new call.
+
+        Called when a tool call finishes: a command that ran for 45 seconds
+        must not make the agent look idle the moment it returns.
+        """
+        with self._lock:
+            if not self._session_start:
+                return
+            self._last_activity = time.time()
+            self._reschedule()
+
+    def _reschedule(self) -> None:
+        # Cancel the existing idle timer, then start a fresh one if idle
+        # notifications are active. Callers hold the lock.
+        if self._timer:
+            self._timer.cancel()
+            self._timer = None
+        cfg = settings.get("notifications", default={}) or {}
+        if is_enabled() and cfg.get("notify_on_idle", True):
+            idle_secs = int(cfg.get("idle_timeout_seconds", 60) or 60)
+            if idle_secs > 0:
+                self._timer = threading.Timer(idle_secs, self._on_idle_timeout)
+                self._timer.daemon = True
+                self._timer.start()
 
     def _on_idle_timeout(self) -> None:
         with self._lock:
@@ -262,6 +276,10 @@ _tracker = _ActivityTracker()
 
 def record_tool_activity(tool_name: str, detail: str = "") -> None:
     _tracker.record_activity(tool_name, detail)
+
+
+def record_tool_finished() -> None:
+    _tracker.touch()
 
 
 def notify_from_agent(message: str = "") -> tuple[bool, str]:

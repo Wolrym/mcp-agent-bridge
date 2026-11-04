@@ -1,4 +1,7 @@
-"""Checks for background jobs, command timeouts and port conflicts.
+"""Checks for background jobs and port conflicts.
+
+run_command itself (quick results, backgrounding slow commands, keeping
+the event loop free) is covered by tests/tools_test.py.
 
 Run it directly:
 
@@ -11,7 +14,6 @@ ones.
 """
 from __future__ import annotations
 
-import asyncio
 import socket
 import sys
 import time
@@ -22,7 +24,6 @@ sys.path.insert(0, str(ROOT))
 
 import run_core  # noqa: E402
 from core import jobs  # noqa: E402
-from servers import tools_terminal  # noqa: E402
 
 failures = []
 
@@ -42,43 +43,6 @@ def py(code: str) -> str:
     embedded newlines inside -c.
     """
     return '"' + sys.executable + '" -c "' + code + '"'
-
-
-def test_short_command() -> None:
-    result = tools_terminal._execute(py("print('hi')"), ROOT, 30)
-    check("a quick command succeeds", result.get("exit_code") == 0)
-    check("its output comes back", "hi" in (result.get("stdout") or ""))
-
-
-def test_timeout_kills_the_tree() -> None:
-    started = time.time()
-    result = tools_terminal._execute(py("import time; time.sleep(45)"), ROOT, 2)
-    elapsed = time.time() - started
-    check("a timeout is reported", result.get("timed_out") is True)
-    check("and it returns promptly", elapsed < 20, str(round(elapsed, 1)) + "s")
-
-
-def test_command_does_not_block_the_loop() -> None:
-    """The whole point of the fix: other work continues while a command runs."""
-
-    async def scenario() -> int:
-        ticks = 0
-
-        async def tick() -> None:
-            nonlocal ticks
-            while True:
-                await asyncio.sleep(0.05)
-                ticks += 1
-
-        ticker = asyncio.create_task(tick())
-        await asyncio.to_thread(
-            tools_terminal._execute, py("import time; time.sleep(1.5)"), ROOT, 30
-        )
-        ticker.cancel()
-        return ticks
-
-    ticks = asyncio.run(scenario())
-    check("the event loop keeps running", ticks > 5, str(ticks) + " ticks")
 
 
 def test_job_runs_to_completion() -> None:
@@ -144,9 +108,6 @@ def test_port_conflict_is_explained() -> None:
 
 
 def main() -> int:
-    test_short_command()
-    test_timeout_kills_the_tree()
-    test_command_does_not_block_the_loop()
     test_job_runs_to_completion()
     test_job_can_be_stopped()
     test_port_conflict_is_explained()
