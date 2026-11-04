@@ -1,10 +1,21 @@
+import json
 import os
 import sys
+import tempfile
 import time
 from pathlib import Path
 
 # Add project root to sys.path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
+# Never run against the real settings: test_credentials_resolution writes
+# fake credentials, and once that replaced the user's real bot token and
+# chat id. The settings singleton is created on import, so this comes first.
+_settings_file = Path(tempfile.mkdtemp(prefix="mcp-notifier-")) / "settings.json"
+_settings_file.write_text(
+    json.dumps({"auth": {"enabled": True, "token": "notifier-test"}}), encoding="utf-8"
+)
+os.environ["MCP_SETTINGS_PATH"] = str(_settings_file)
 
 from core import notifier
 from core.config import settings

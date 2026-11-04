@@ -1,18 +1,32 @@
 """Checks for the undo history and for paged reads.
 
 Undo touches real files, so it gets a real test rather than a hopeful
-read-through. Everything happens in a scratch folder inside the active
-project, which is removed at the end.
+read-through. It runs on a throwaway settings file whose only project is
+a temporary folder, so neither the real settings nor a real project are
+touched.
 
     python tests\\backups_test.py
 """
 from __future__ import annotations
 
+import json
+import os
 import shutil
 import sys
+import tempfile
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
+# The settings singleton is created on import, so this has to come first.
+_TEMP = Path(tempfile.mkdtemp(prefix="mcp-backups-"))
+(_TEMP / "project").mkdir()
+(_TEMP / "settings.json").write_text(json.dumps({
+    "auth": {"enabled": True, "token": "backups-test"},
+    "projects": [{"id": "t", "name": "t", "root": str(_TEMP / "project"), "selected_at": None}],
+    "active_project_id": "t",
+}), encoding="utf-8")
+os.environ["MCP_SETTINGS_PATH"] = str(_TEMP / "settings.json")
 
 from core import backups, projects  # noqa: E402
 from core.config import settings  # noqa: E402
@@ -117,9 +131,9 @@ def main() -> int:
         past = _page(body, Path("x.txt"), 500, 10)
         check("offset past the end is explained", "past the end" in past)
 
-        shutil.rmtree(scratch, ignore_errors=True)
     finally:
         settings.set("backups", "enabled", was_enabled)
+        shutil.rmtree(_TEMP, ignore_errors=True)
 
     print()
     if failures:
