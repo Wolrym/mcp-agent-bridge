@@ -281,3 +281,101 @@ class CopyField(QWidget):
             self._copy_button.setEnabled(True)
 
         QTimer.singleShot(1200, restore)
+
+
+class CollapsibleCard(QFrame):
+    """Bordered surface with an expandable/collapsible body and a clickable header.
+
+    Displays an arrow indicator (▾ expanded, ▸ collapsed), title, optional
+    description, and extra widgets (e.g. Badges) in the header.
+    """
+
+    def __init__(
+        self,
+        title: str,
+        description: str = "",
+        collapsed: bool = False,
+        parent: QWidget | None = None,
+    ) -> None:
+        super().__init__(parent)
+        self.setObjectName("card")
+        self._collapsed = collapsed
+
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(18, 14, 18, 14)
+        outer.setSpacing(10)
+
+        # Clickable header container
+        self._header_widget = QWidget()
+        self._header_widget.setCursor(Qt.PointingHandCursor)
+        self._header = QHBoxLayout(self._header_widget)
+        self._header.setContentsMargins(0, 0, 0, 0)
+        self._header.setSpacing(10)
+
+        # Indicator
+        self._arrow = QLabel("▾" if not collapsed else "▸")
+        self._arrow.setStyleSheet("color: #71717a; font-size: 13px; font-weight: bold;")
+        self._arrow.setFixedWidth(14)
+        self._header.addWidget(self._arrow)
+
+        titles = QVBoxLayout()
+        titles.setContentsMargins(0, 0, 0, 0)
+        titles.setSpacing(2)
+        self._title_lbl = label(title, "cardTitle")
+        titles.addWidget(self._title_lbl)
+        if description:
+            self._desc_lbl = label(description, "cardDescription")
+            titles.addWidget(self._desc_lbl)
+        else:
+            self._desc_lbl = None
+
+        self._header.addLayout(titles, 1)
+
+        self._extras = QHBoxLayout()
+        self._extras.setContentsMargins(0, 0, 0, 0)
+        self._extras.setSpacing(8)
+        self._header.addLayout(self._extras)
+
+        outer.addWidget(self._header_widget)
+
+        # Body container
+        self._body_widget = QWidget()
+        self._body = QVBoxLayout(self._body_widget)
+        self._body.setContentsMargins(0, 4, 0, 0)
+        self._body.setSpacing(10)
+        outer.addWidget(self._body_widget)
+
+        if collapsed:
+            self._body_widget.setVisible(False)
+
+        self._header_widget.mousePressEvent = self._on_header_clicked
+
+    def _on_header_clicked(self, event) -> None:
+        if event.button() == Qt.LeftButton:
+            self.toggle()
+            event.accept()
+        else:
+            super(QWidget, self._header_widget).mousePressEvent(event)
+
+    def toggle(self) -> None:
+        self.set_collapsed(not self._collapsed)
+
+    def set_collapsed(self, collapsed: bool) -> None:
+        self._collapsed = collapsed
+        self._body_widget.setVisible(not collapsed)
+        self._arrow.setText("▸" if collapsed else "▾")
+
+    def is_collapsed(self) -> bool:
+        return self._collapsed
+
+    def header_extra(self, widget: QWidget) -> QWidget:
+        self._extras.addWidget(widget, 0, Qt.AlignVCenter | Qt.AlignRight)
+        return widget
+
+    def add(self, widget: QWidget) -> QWidget:
+        self._body.addWidget(widget)
+        return widget
+
+    def add_layout(self, layout) -> None:
+        self._body.addLayout(layout)
+

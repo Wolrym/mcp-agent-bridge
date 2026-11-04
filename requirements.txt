@@ -1,5 +1,5 @@
 # Core (headless) dependencies
-mcp[cli]>=1.2.0
+mcp[cli]>=1.2.0,<2
 uvicorn>=0.30
 starlette>=0.37
 

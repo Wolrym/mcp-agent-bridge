@@ -73,6 +73,14 @@ DEFAULTS: dict[str, Any] = {
     # click. The headless CLI ignores it: there, starting is the whole point.
     "gui": {"autostart": False},
     "skills_root": "",
+    "notifications": {
+        "enabled": False,
+        "bot_token": "",
+        "chat_id": "",
+        "idle_timeout_seconds": 60,
+        "notify_on_idle": True,
+        "notify_tool_enabled": True,
+    },
     "projects": [],
     "active_project_id": None,
 }

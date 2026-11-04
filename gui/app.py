@@ -18,6 +18,7 @@ from PySide6.QtCore import Qt  # noqa: E402
 from PySide6.QtGui import QColor, QFont, QPalette  # noqa: E402
 from PySide6.QtWidgets import QApplication  # noqa: E402
 
+import os
 from core import logs  # noqa: E402
 from core.config import settings  # noqa: E402
 from gui.main_window import MainWindow  # noqa: E402
@@ -76,7 +77,13 @@ def main(argv: list | None = None) -> int:
     # focus effects crisp instead of relying on platform defaults.
     app.setAttribute(Qt.AA_DontCreateNativeWidgetSiblings, True)
 
-    window = MainWindow()
+    use_v2 = "--v2" in args or os.environ.get("MCP_GUI_V2") == "1"
+    if use_v2:
+        from gui.main_window_v2 import MainWindowV2
+        window = MainWindowV2()
+    else:
+        window = MainWindow()
+
     window.show()
 
     # --start is the one-off way in; the autostart toggle on the panel is

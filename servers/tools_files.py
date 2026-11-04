@@ -20,7 +20,7 @@ import shutil
 from datetime import datetime
 from pathlib import Path
 
-from core import backups, logs, paths, projects
+from core import backups, logs, notifier, paths, projects
 from core.config import settings
 
 SKIP_DIRS = {
@@ -106,6 +106,20 @@ def _undo_hint(change_id: str) -> str:
 
 def register(mcp) -> None:
     """Attach every file tool to the given FastMCP instance."""
+    raw_tool = mcp.tool
+
+    def tracked_tool(*args, **kwargs):
+        decorator = raw_tool(*args, **kwargs)
+        def wrapper(fn):
+            import functools
+            @functools.wraps(fn)
+            def wrapped(*f_args, **f_kwargs):
+                notifier.record_tool_activity(fn.__name__)
+                return fn(*f_args, **f_kwargs)
+            return decorator(wrapped)
+        return wrapper
+
+    mcp.tool = tracked_tool
 
     @mcp.tool()
     def list_directory(path: str = ".") -> str:
