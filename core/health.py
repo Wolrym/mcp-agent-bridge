@@ -19,7 +19,6 @@ reason the app fails to start.
 """
 from __future__ import annotations
 
-import json
 import socket
 import urllib.error
 import urllib.request
@@ -173,17 +172,3 @@ def describe(result: dict) -> str:
         return kind + " (" + inner + ")"
 
     return "   |   ".join(p for p in (part("local"), part("public")) if p)
-
-
-def fetch_project(timeout: float = 2.0) -> str:
-    """Ask a running server which project it is serving, for cross-checking."""
-    url = local_urls().get("files", "")
-    if not url:
-        return ""
-    request = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
-    try:
-        with urllib.request.urlopen(request, timeout=timeout) as response:
-            payload = json.loads(response.read().decode("utf-8"))
-        return str(payload.get("project") or "")
-    except (urllib.error.URLError, OSError, ValueError):
-        return ""

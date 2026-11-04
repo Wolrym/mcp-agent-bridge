@@ -6,14 +6,13 @@ for a human with a browser. This middleware intercepts one path and
 replies with plain JSON, before authentication, so a readiness check never
 needs the token.
 
-It deliberately exposes nothing sensitive: server name, whether it is
-serving, and which project is active.
+It deliberately exposes nothing sensitive - the endpoint is public - so
+it reports only the server name and that it is serving. (It used to
+include the active project's full path.)
 """
 from __future__ import annotations
 
 import json
-
-from core import projects
 
 HEALTH_PATH = "/health"
 
@@ -32,12 +31,6 @@ class HealthMiddleware:
             return
 
         payload = {"status": "ok", "server": self.name}
-        try:
-            project = projects.active_project()
-            payload["project"] = project["name"]
-            payload["root"] = project["root"]
-        except Exception:  # noqa: BLE001 - health must never fail loudly
-            payload["project"] = None
 
         body = json.dumps(payload).encode("utf-8")
         await send({
