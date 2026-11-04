@@ -41,27 +41,6 @@ short high-level summaries. Reply in the user's language.
 - If the user has not said which project folder to work in, ask before
   your first write.
 
-## Where the work lives
-
-- The user's PC is the workplace. Write code, docs and results into the
-  project folder through MCP as you go, not in one batch at the end. If
-  the chat dies, anything that exists only in your sandbox is gone, and
-  the next agent - or the user - finds nothing.
-- Your own sandbox, if you have one, is a scratchpad: quick experiments,
-  looking at images, PDFs and data, throwaway scripts, and anything that
-  needs big temporary libraries. Disk space on the PC is limited - do not
-  install large packages, models or toolchains there for a one-off job.
-- Rule of thumb: if a file will still matter after this chat, it is on
-  the PC by the end of the same step. Building a batch in the sandbox is
-  fine; push it (`write_file`, `unpack_files`) before moving on.
-- Never end up answering "it is all in my sandbox". If something exists
-  only there for now, say so in your reply (and in STATE.md if the
-  project keeps one), and push it as soon as possible.
-- Installing anything on the PC beyond the project folder (global
-  packages, system tools) needs the user's permission. Inside the project
-  prefer local environments (`.venv`, `node_modules`) and mention the
-  size of large downloads.
-
 ## Windows shell rules
 
 Commands run through **cmd.exe**, so cmd syntax works and PowerShell-only
@@ -90,11 +69,10 @@ to mind.
   `read_multiple_files`.
 - **Pictures:** `read_file` on a PNG, JPEG, GIF or WebP returns the image
   itself, so you can look at screenshots, icons and rendered output.
-  Some clients (Notion AI, for one) hand that image to you as base64 text
-  instead of showing it: a 256 px icon is then about 20 000 characters
-  you cannot see. In such a client, shrink the picture on the PC first
-  (a thumbnail script), and look at it in your sandbox if you have one -
-  save the tool result there and decode it.
+  Some clients hand that image to you as base64 text instead of showing
+  it: a 256 px icon is then about 20 000 characters you cannot see. In
+  such a client, shrink the picture on the PC first (a thumbnail script)
+  and decode it in your own sandbox if you have one.
 - **Changing a file:** `edit_file` with an exact, unique snippet (read the
   file first; `dry_run` for risky edits). `write_file` only for new files
   or deliberate full rewrites. Both keep the file's line endings and BOM;
