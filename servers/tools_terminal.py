@@ -344,6 +344,12 @@ def register(mcp) -> None:
             "access outside this folder: "
             + ("allowed (use absolute paths)" if outside else "refused")
         )
+        log_file = logs.file_path()
+        if log_file:
+            lines.append(
+                f"call log: {log_file} - every tool call, one line each; grep it "
+                "for your project folder to see what earlier chats did"
+            )
         others = [p for p in projects.list_projects() if p["id"] != project["id"]]
         if others:
             lines.append(

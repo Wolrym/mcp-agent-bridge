@@ -22,6 +22,21 @@ except AttributeError:  # pragma: no cover - non-Windows
     _CREATION_FLAGS = 0
 
 
+def classify_line(text: str):
+    """Log level for one line of child output, or None to drop it.
+
+    cloudflared tags its own lines INF / WRN / ERR. Its ERR lines used to
+    land in the log as plain info, while the most common one - "context
+    canceled" - only means the MCP client hung up on a request, which
+    clients do all the time. That one is dropped; real errors are warnings.
+    """
+    if "context canceled" in text:
+        return None
+    if " ERR " in text or " WRN " in text:
+        return "warn"
+    return "info"
+
+
 class ManagedProcess:
     """A single supervised child process."""
 
@@ -31,6 +46,7 @@ class ManagedProcess:
         self._process: subprocess.Popen | None = None
         self._reader: threading.Thread | None = None
         self._lock = threading.RLock()
+        self._stopping = False
 
     # --- state -----------------------------------------------------------
 
@@ -63,6 +79,7 @@ class ManagedProcess:
             if self.running:
                 return
             executable = shutil.which(self.command[0]) or self.command[0]
+            self._stopping = False
             try:
                 self._process = subprocess.Popen(
                     [executable, *self.command[1:]],
@@ -98,6 +115,8 @@ class ManagedProcess:
         if process is None or process.poll() is not None:
             return
 
+        # Exiting because we asked it to is not an error.
+        self._stopping = True
         process.terminate()
         try:
             process.wait(timeout=timeout)
@@ -123,9 +142,13 @@ class ManagedProcess:
             return
         for line in stream:
             text = line.rstrip()
-            if text:
-                logs.log(self.name, text)
+            level = classify_line(text) if text else None
+            if level:
+                logs.log(self.name, text, level=level)
         code = process.wait()
+        if self._stopping:
+            self._stopping = False
+            return
         level = "info" if code == 0 else "error"
         logs.log(self.name, f"Exited with code {code}", level=level)
 
