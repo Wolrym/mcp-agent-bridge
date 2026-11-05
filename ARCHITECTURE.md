@@ -209,7 +209,10 @@ Colours live in `gui/widgets/tokens.py`; theme.qss refers to them as
 directly. Controls have a brighter top edge than bottom; the orange of
 the icon is only an accent (selected page, focus ring, a faint glow at
 the top of the content panel). Status pills are all the same quiet
-graphite; only their dot carries the colour.
+graphite; only their dot carries the colour. The window buttons are painted 1 px
+icons on the pixel grid with a fading graphite hover (red for close).
+The activity log is a QTextEdit (QPlainTextEdit ignores paragraph
+indents) so wrapped lines hang under the message column.
 
 Widget gotcha: never call `setVisible(True)`/`show()` on a widget that
 has no parent yet - Qt opens it as a tiny top-level window for a moment,

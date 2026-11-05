@@ -84,6 +84,9 @@ COLORS = {
     "neutral_text": "#a1a1aa",
     "neutral_bg": "#151517",
     "neutral_edge": "#25252a",
+    # window close button (hover)
+    "win_close": "#c4372b",
+    "win_close_hi": "#d4594e",
     # status pills
     "pill_bg": "#141416",
     "pill_edge": "#232327",

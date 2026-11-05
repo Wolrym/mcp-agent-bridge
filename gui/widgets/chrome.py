@@ -17,8 +17,8 @@ Usage:
 """
 from __future__ import annotations
 
-from PySide6.QtCore import QEvent, QObject, QRectF, QSize, Qt
-from PySide6.QtGui import QColor, QPainter, QPen
+from PySide6.QtCore import QEasingCurve, QEvent, QObject, QPointF, QRectF, QSize, Qt, QVariantAnimation
+from PySide6.QtGui import QColor, QPainter, QPainterPath, QPen
 from PySide6.QtWidgets import (
     QAbstractButton,
     QHBoxLayout,
@@ -36,8 +36,14 @@ ICON_SIZE = 18
 # Colours come from the shared tokens, like theme.qss.
 ICON = QColor(COLORS["muted"])
 ICON_HOVER = QColor(COLORS["text_strong"])
-HOVER_BG = QColor(COLORS["selected"])
-CLOSE_BG = QColor("#c42b1c")  # the Windows close-button red
+# Hover looks like the selected segment of a segmented control: a graphite
+# fill with a lit top edge. Close turns red, as on Windows, but a muted one.
+HOVER_BG = QColor(COLORS["seg_sel"])
+HOVER_HI = QColor(COLORS["seg_sel_hi"])
+PRESS_BG = QColor(COLORS["btn_top_hover"])
+CLOSE_BG = QColor(COLORS["win_close"])
+CLOSE_HI = QColor(COLORS["win_close_hi"])
+CLOSE_ICON = QColor("#ffffff")
 
 _EDGES = (
     (Qt.LeftEdge, Qt.SizeHorCursor),
@@ -69,69 +75,116 @@ class _Grip(QWidget):
             handle.startSystemResize(self._edges)
 
 
+_TIPS = {"minimize": "Minimize", "maximize": "Maximize", "restore": "Restore", "close": "Close"}
+
+
+def _mix(a: QColor, b: QColor, t: float) -> QColor:
+    return QColor(
+        round(a.red() + (b.red() - a.red()) * t),
+        round(a.green() + (b.green() - a.green()) * t),
+        round(a.blue() + (b.blue() - a.blue()) * t),
+        round(a.alpha() + (b.alpha() - a.alpha()) * t),
+    )
+
+
 class WindowButton(QAbstractButton):
     """A caption button whose icon is drawn, not typed.
 
-    `kind` is one of: minimize, maximize, restore, close.
+    `kind` is one of: minimize, maximize, restore, close. Icons are 10 px
+    hairlines snapped to the pixel grid, so they stay sharp at 100 %; the
+    hover fill fades in instead of blinking.
     """
 
     def __init__(self, kind: str, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self.kind = kind
-        self._hovered = False
-        self.setFixedSize(34, 26)
+        self._hover = 0.0
+        self.setFixedSize(36, 28)
         self.setCursor(Qt.ArrowCursor)
         self.setFocusPolicy(Qt.NoFocus)
         self.setAttribute(Qt.WA_Hover, True)
+        self.setToolTip(_TIPS.get(kind, ""))
+        self._fade = QVariantAnimation(self)
+        self._fade.setDuration(120)
+        self._fade.setEasingCurve(QEasingCurve.OutCubic)
+        self._fade.valueChanged.connect(self._set_hover)
 
     def set_kind(self, kind: str) -> None:
         self.kind = kind
+        self.setToolTip(_TIPS.get(kind, ""))
         self.update()
+
+    def _set_hover(self, value) -> None:
+        self._hover = float(value)
+        self.update()
+
+    def _animate(self, target: float) -> None:
+        self._fade.stop()
+        self._fade.setStartValue(self._hover)
+        self._fade.setEndValue(target)
+        self._fade.start()
 
     def enterEvent(self, event) -> None:  # noqa: N802 - Qt naming
-        self._hovered = True
-        self.update()
+        self._animate(1.0)
+        super().enterEvent(event)
 
     def leaveEvent(self, event) -> None:  # noqa: N802 - Qt naming
-        self._hovered = False
-        self.update()
+        self._animate(0.0)
+        super().leaveEvent(event)
 
     def paintEvent(self, event) -> None:  # noqa: N802 - Qt naming
         painter = QPainter(self)
         painter.setRenderHint(QPainter.Antialiasing, True)
+        close = self.kind == "close"
+        t = self._hover
 
-        if self._hovered:
-            background = CLOSE_BG if self.kind == "close" else HOVER_BG
+        if t > 0.01:
+            fill = QColor(CLOSE_BG if close else (PRESS_BG if self.isDown() else HOVER_BG))
+            edge = QColor(CLOSE_HI if close else HOVER_HI)
+            fill.setAlphaF(fill.alphaF() * t)
+            edge.setAlphaF(edge.alphaF() * t)
+            shape = QRectF(self.rect()).adjusted(1, 1, -1, -1)
             painter.setPen(Qt.NoPen)
-            painter.setBrush(background)
-            painter.drawRoundedRect(QRectF(self.rect()).adjusted(1, 1, -1, -1), 6, 6)
+            painter.setBrush(edge)
+            painter.drawRoundedRect(shape, 7, 7)
+            painter.setBrush(fill)
+            painter.drawRoundedRect(shape.adjusted(0, 1, 0, 0), 7, 7)
 
-        colour = ICON_HOVER if self._hovered else ICON
+        colour = _mix(ICON, CLOSE_ICON if close else ICON_HOVER, t)
         pen = QPen(colour)
-        pen.setWidthF(1.3)
-        pen.setCapStyle(Qt.RoundCap)
+        pen.setWidthF(1.0)
+        pen.setCapStyle(Qt.SquareCap if self.kind != "close" else Qt.RoundCap)
+        pen.setJoinStyle(Qt.MiterJoin)
         painter.setPen(pen)
         painter.setBrush(Qt.NoBrush)
 
-        centre = QRectF(self.rect()).center()
-        size = 9.0
-        box = QRectF(0, 0, size, size)
-        box.moveCenter(centre)
+        # A 10 px box on half-pixel coordinates: 1 px lines land on whole
+        # device pixels instead of smearing across two.
+        size = 10
+        left = (self.width() - size) // 2 + 0.5
+        top = (self.height() - size) // 2 + 0.5
+        right, bottom = left + size - 1, top + size - 1
 
         if self.kind == "minimize":
-            y = centre.y()
-            painter.drawLine(box.left(), y, box.right(), y)
+            y = top + size // 2
+            painter.drawLine(QPointF(left, y), QPointF(right, y))
         elif self.kind == "maximize":
-            painter.drawRoundedRect(box, 1.5, 1.5)
+            painter.drawRoundedRect(QRectF(left, top, size - 1, size - 1), 1.5, 1.5)
         elif self.kind == "restore":
-            back = QRectF(box).adjusted(2.5, -2.5, 2.5, -2.5)
-            painter.drawRoundedRect(back, 1.5, 1.5)
-            front = QRectF(box).adjusted(-2.5, 2.5, -2.5, 2.5)
-            painter.setBrush(Qt.NoBrush)
-            painter.drawRoundedRect(front, 1.5, 1.5)
+            # Front window bottom-left, the back one only as its visible L.
+            painter.drawRoundedRect(QRectF(left, top + 2, size - 3, size - 3), 1.2, 1.2)
+            path = QPainterPath(QPointF(left + 2, top + 2))
+            path.lineTo(left + 2, top)
+            path.lineTo(right, top)
+            path.lineTo(right, bottom - 2)
+            path.lineTo(right - 2, bottom - 2)
+            painter.drawPath(path)
         else:  # close
-            painter.drawLine(box.topLeft(), box.bottomRight())
-            painter.drawLine(box.topRight(), box.bottomLeft())
+            pen.setWidthF(1.2)  # diagonals look thinner than straight lines
+            painter.setPen(pen)
+            inset = 0.5
+            painter.drawLine(QPointF(left + inset, top + inset), QPointF(right - inset, bottom - inset))
+            painter.drawLine(QPointF(right - inset, top + inset), QPointF(left + inset, bottom - inset))
 
 
 class TitleBar(QWidget):
@@ -186,18 +239,22 @@ class TitleBar(QWidget):
 
         layout.addStretch(1)
 
+        buttons = QHBoxLayout()
+        buttons.setContentsMargins(0, 0, 0, 0)
+        buttons.setSpacing(2)
         if show_maximize:
             minimize = WindowButton("minimize", self)
             minimize.clicked.connect(window.showMinimized)
-            layout.addWidget(minimize)
+            buttons.addWidget(minimize)
 
             self._maximize = WindowButton("maximize", self)
             self._maximize.clicked.connect(self.toggle_maximized)
-            layout.addWidget(self._maximize)
+            buttons.addWidget(self._maximize)
 
         close = WindowButton("close", self)
         close.clicked.connect(window.close)
-        layout.addWidget(close)
+        buttons.addWidget(close)
+        layout.addLayout(buttons)
 
     def add_widget(self, widget: QWidget) -> QWidget:
         """Place a widget (a status pill, say) next to the title."""
