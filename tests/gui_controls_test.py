@@ -6,7 +6,9 @@ Builds the real window (no servers are started) and asserts that:
   * the scroll viewport is transparent, which is what kept the shell's
     bottom-left corner rounded;
   * building rows (startup, settings refresh, setup guide) never flashes
-    a widget as its own little top-level window.
+    a widget as its own little top-level window;
+  * the guide's Skills page opens groups, hides bin/ and shows a project's
+    instruction files and its overriding skills.
 
 Run with:
     set "QT_QPA_PLATFORM=offscreen" && python tests\\gui_controls_test.py
@@ -159,6 +161,52 @@ def main() -> int:
         guide.show_page(index)
     app.processEvents()
     check("no stray top-level windows", not stray, ", ".join(stray[:5]))
+
+    # --- skills page ---------------------------------------------------------
+    from gui.widgets.primitives import SettingRow
+
+    def titles(group) -> list:
+        layout = group._rows
+        found = []
+        for i in range(layout.count()):
+            widget = layout.itemAt(i).widget()
+            if isinstance(widget, SettingRow):
+                found.append(widget._title.text())
+        return found
+
+    def make_skill(folder: Path, name: str) -> None:
+        folder.mkdir(parents=True, exist_ok=True)
+        (folder / "SKILL.md").write_text(
+            f"---\nname: {name}\ndescription: {name} test\n---\nbody\n", encoding="utf-8"
+        )
+
+    lab = Path(tempfile.mkdtemp(prefix="mcp-gui-skills-"))
+    make_skill(lab / "skills" / "top", "top")
+    make_skill(lab / "skills" / "grp" / "alpha", "alpha")
+    make_skill(lab / "skills" / "grp" / "beta", "beta")
+    make_skill(lab / "skills" / "bin" / "parked", "parked")
+    project_dir = lab / "proj"
+    make_skill(project_dir / ".agents" / "skills" / "top", "top")
+    (project_dir / "AGENTS.md").write_text("# rules\n", encoding="utf-8")
+    settings.set("skills_root", str(lab / "skills"))
+
+    guide.refresh()
+    shown = titles(guide._skills_group)
+    check("guide: groups closed, bin/ hidden", shown == ["top", "grp/"], str(shown))
+    check("guide: no project group in global scope", guide._project_group.isHidden())
+    guide._toggle_group("grp")
+    shown = titles(guide._skills_group)
+    check("guide: Show opens a group", shown == ["top", "grp/", "alpha", "beta"], str(shown))
+    guide.set_skill_scope("folder", str(project_dir))
+    shown = titles(guide._project_group)
+    check("guide: project instructions and skills", shown == ["AGENTS.md", "top"], str(shown))
+    overriding = [
+        w for w in guide._project_group.findChildren(SettingRow)
+        if w._title.text() == "top" and "overrides" in w.description()
+    ]
+    check("guide: override is marked", bool(overriding))
+    app.processEvents()
+    check("guide: still no stray windows", not stray, ", ".join(stray[:5]))
     guide.deleteLater()
 
     window.close()

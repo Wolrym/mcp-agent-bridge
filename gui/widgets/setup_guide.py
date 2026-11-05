@@ -27,6 +27,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from core import projects as projects_module
 from core import skills as skills_module
 from core import tunnel
 from core.config import settings
@@ -38,6 +39,7 @@ from gui.widgets.primitives import (
     Group,
     NavButton,
     Page,
+    Segmented,
     SettingRow,
     button,
     label,
@@ -295,7 +297,8 @@ class SetupGuideDialog(QDialog):
             _step(
                 3,
                 "Grouped skills (design/, animation/, ...) are listed "
-                "collapsed; agents open a group with list_skills(group=...).",
+                "collapsed; agents open a group with list_skills(group=...). "
+                "Here, Show opens a group.",
             )
         )
         instructions.add(
@@ -304,29 +307,50 @@ class SetupGuideDialog(QDialog):
                 "Project skills go into <project>/.agents/skills/<name>/SKILL.md. "
                 "list_skills(project=...) shows them next to these global ones, "
                 "together with the project's AGENTS.md / CLAUDE.md; on a name "
-                "clash the project's skill wins.",
+                "clash the project's skill wins. Pick a project below to see "
+                "exactly what an agent gets there.",
             )
         )
         instructions.add(
             _step(
                 5,
                 "Skills you want to keep but switch off go into the bin/ folder: "
-                "agents never see them. \"Pack as .zip\" turns any skill folder "
-                "into an archive for uploading elsewhere (Notion: Library > "
+                "agents never see them. Pack turns a skill folder into a .zip "
+                "in Downloads for uploading elsewhere (Notion: Library > "
                 "Skills > More ways to add a skill > Upload skill).",
             )
         )
         page.add(instructions)
 
-        self._skills_group = Group("Skills")
+        # Which project's view to show: what an agent gets with
+        # list_skills() or list_skills(project=...).
+        self._scope = "global"
+        self._scope_folder = ""
+        self._expanded: set = set()
+
+        scope_group = Group("Show skills for")
+        self._scope_row = SettingRow("Global skills only", "")
+        self._scope_picker = Segmented(
+            [("global", "Global"), ("active", "Active project"), ("folder", "Other folder...")],
+            "global",
+        )
+        self._scope_picker.changed.connect(self._pick_scope)
+        self._scope_row.add(self._scope_picker)
+        scope_group.add_row(self._scope_row)
+        page.add(scope_group)
+
+        self._project_group = Group("Project")
+        page.add(self._project_group)
+
+        self._skills_group = Group("Global skills")
         open_folder_btn = button("Open folder", "ghost")
         open_folder_btn.clicked.connect(self._open_skills_folder)
         self._skills_group.header_extra(open_folder_btn)
         reload_btn = button("Reload", "ghost")
         reload_btn.clicked.connect(self._load_skills)
         self._skills_group.header_extra(reload_btn)
-        pack_btn = button("Pack as .zip", "ghost", "Zip a skill folder for uploading to another agent")
-        pack_btn.clicked.connect(self._pack_skill)
+        pack_btn = button("Pack folder...", "ghost", "Zip any skill folder for uploading to another agent")
+        pack_btn.clicked.connect(lambda: self._pack_skill())
         self._skills_group.header_extra(pack_btn)
         page.add(self._skills_group)
 
@@ -436,13 +460,14 @@ class SetupGuideDialog(QDialog):
         root = skills_module.skills_root()
         QDesktopServices.openUrl(QUrl.fromLocalFile(str(root)))
 
-    def _pack_skill(self) -> None:
+    def _pack_skill(self, folder: str = "") -> None:
         """Zip one skill folder into Downloads, ready for an upload form."""
         from PySide6.QtWidgets import QFileDialog, QMessageBox
 
-        folder = QFileDialog.getExistingDirectory(
-            self, "Choose a skill folder", str(skills_module.skills_root())
-        )
+        if not folder:
+            folder = QFileDialog.getExistingDirectory(
+                self, "Choose a skill folder", str(skills_module.skills_root())
+            )
         if not folder:
             return
         downloads = Path.home() / "Downloads"
@@ -464,28 +489,147 @@ class SetupGuideDialog(QDialog):
         if box.clickedButton() is show:
             QDesktopServices.openUrl(QUrl.fromLocalFile(str(archive.parent)))
 
-    def _load_skills(self) -> None:
+    # --- skills list -----------------------------------------------------
+
+    def _pick_scope(self, key: str) -> None:
+        if key == "folder":
+            from PySide6.QtWidgets import QFileDialog
+
+            start = self._scope_folder or str(Path.home())
+            folder = QFileDialog.getExistingDirectory(self, "Choose a project folder", start)
+            if not folder:
+                self._scope_picker.set_value(self._scope)
+                return
+            self._scope_folder = folder
+        self.set_skill_scope(key, self._scope_folder)
+
+    def set_skill_scope(self, scope: str, folder: str = "") -> None:
+        """Show the global skills ("global"), or add a project's view
+        ("active" project or any "folder")."""
+        self._scope = scope if scope in ("global", "active", "folder") else "global"
+        if self._scope == "folder":
+            self._scope_folder = folder
+        self._scope_picker.set_value(self._scope)
+        self._load_skills()
+
+    def _scope_project(self) -> tuple:
+        """(title, folder) of the project being shown; folder "" = none."""
+        if self._scope == "folder" and self._scope_folder:
+            return Path(self._scope_folder).name or self._scope_folder, self._scope_folder
+        if self._scope == "active":
+            try:
+                project = projects_module.active_project()
+            except projects_module.ProjectError as exc:
+                return str(exc), ""
+            return str(project.get("name") or project.get("root")), str(project.get("root") or "")
+        return "", ""
+
+    def _copy_button(self, path_to_file: str) -> QPushButton:
         from PySide6.QtCore import QTimer
 
+        btn = button("Copy text", "secondary", "Copy the file to the clipboard")
+
+        def handler() -> None:
+            try:
+                content = Path(path_to_file).read_text(encoding="utf-8")
+            except (OSError, UnicodeDecodeError):
+                btn.setText("Failed to read")
+                return
+            QGuiApplication.clipboard().setText(content)
+            btn.setText("Copied")
+            btn.setEnabled(False)
+            QTimer.singleShot(1200, lambda: (btn.setText("Copy text"), btn.setEnabled(True)))
+
+        btn.clicked.connect(handler)
+        return btn
+
+    @staticmethod
+    def _open_button(path: str, text: str = "Open") -> QPushButton:
+        btn = button(text, "ghost")
+        btn.clicked.connect(
+            lambda _checked=False, f=path: QDesktopServices.openUrl(QUrl.fromLocalFile(f))
+        )
+        return btn
+
+    def _skill_row(self, skill: dict, indent: bool = False, note: str = "") -> SettingRow:
+        description = skill.get("description") or f"Skill slug: {skill['slug']}"
+        if note:
+            description = note + " " + description
+        row = SettingRow(skill["name"], description)
+        if indent:
+            row.layout().setContentsMargins(40, 9, 14, 9)
+        row.add(self._open_button(skill["file"]))
+        pack = button("Pack", "ghost", "Zip this skill into Downloads")
+        pack.clicked.connect(lambda _checked=False, d=skill["dir"]: self._pack_skill(d))
+        row.add(pack)
+        row.add(self._copy_button(skill["file"]))
+        return row
+
+    def _toggle_group(self, name: str) -> None:
+        if name in self._expanded:
+            self._expanded.discard(name)
+        else:
+            self._expanded.add(name)
+        self._load_skills()
+
+    def _load_skills(self) -> None:
+        title, folder = self._scope_project()
+        found = skills_module.discover(folder or None)
+        global_skills = [s for s in found if s["origin"] == "bridge"]
+        project_skills = [s for s in found if s["origin"] != "bridge"]
+
+        # --- scope line
+        if self._scope == "global":
+            self._scope_row.set_title("Global skills only")
+            self._scope_row.set_description("What list_skills() shows without a project.")
+        else:
+            self._scope_row.set_title(title or "No folder chosen")
+            self._scope_row.set_description(
+                f"What list_skills(project=...) shows for {folder}." if folder else ""
+            )
+
+        # --- project: instruction files, then its own skills
+        project = self._project_group
+        project.clear_rows()
+        project.setVisible(bool(folder))
+        if folder:
+            names = set()
+            for s in global_skills:
+                names.update((s["slug"].lower(), s["name"].lower()))
+            instructions = skills_module.project_instructions(folder)
+            project.set_title(f"Project: {title}")
+            project.set_caption(
+                "Instruction files are read first; project skills win over a "
+                "global skill with the same name."
+            )
+            for path, size in instructions:
+                shown = f"{size} B" if size < 1024 else f"{size / 1024:.1f} KB"
+                row = SettingRow(path.name, f"Instructions - {shown}")
+                row.add(self._open_button(str(path)))
+                row.add(self._copy_button(str(path)))
+                project.add_row(row)
+            for s in project_skills:
+                clash = s["slug"].lower() in names or s["name"].lower() in names
+                project.add_row(self._skill_row(s, note="[overrides the global one]" if clash else ""))
+            if not instructions and not project_skills:
+                project.add_row(SettingRow(
+                    "Nothing project-specific",
+                    "No AGENTS.md / CLAUDE.md / GEMINI.md and no "
+                    ".agents/skills/<name>/SKILL.md in this folder.",
+                ))
+
+        # --- global: top-level skills, then groups (closed until shown)
         group = self._skills_group
         group.clear_rows()
-
-        found = skills_module.discover()
-        # Grouped skills would bury the bridge's own under dozens of rows;
-        # they get one summary line instead.
-        own = [s for s in found if not s.get("group")]
-        groups: dict = {}
-        for s in found:
+        own = [s for s in global_skills if not s.get("group")]
+        grouped: dict = {}
+        for s in global_skills:
             if s.get("group"):
-                groups[s["group"]] = groups.get(s["group"], 0) + 1
-        group.set_title(f"Skills ({len(own)})")
-        if groups:
-            summary = ", ".join(f"{name}/ ({count})" for name, count in sorted(groups.items()))
-            group.set_caption("Groups, loaded by agents on demand: " + summary)
-        else:
-            group.set_caption("")
+                grouped.setdefault(s["group"], []).append(s)
+        group.set_title(f"Global skills ({len(own) + sum(len(v) for v in grouped.values())})")
+        group.set_caption("Hidden from agents: the bin/ folder." if global_skills else "")
 
-        if not own:
+        if not global_skills:
             group.add_row(SettingRow(
                 "No skills found",
                 f"Place skill folders (each with a SKILL.md) in {skills_module.skills_root()}",
@@ -493,35 +637,21 @@ class SetupGuideDialog(QDialog):
             return
 
         for s in own:
-            row = SettingRow(s["name"], s.get("description") or f"Skill slug: {s['slug']}")
-            copy_btn = button("Copy text", "secondary", "Copy SKILL.md to the clipboard")
-            skill_file = s["file"]
-
-            def make_copy_handler(path_to_file: str, btn: QPushButton):
-                def handler() -> None:
-                    try:
-                        content = Path(path_to_file).read_text(encoding="utf-8")
-                        QGuiApplication.clipboard().setText(content)
-                        btn.setText("Copied")
-                        btn.setEnabled(False)
-                        QTimer.singleShot(
-                            1200,
-                            lambda: (btn.setText("Copy text"), btn.setEnabled(True)),
-                        )
-                    except Exception:
-                        btn.setText("Failed to read")
-                return handler
-
-            copy_btn.clicked.connect(make_copy_handler(skill_file, copy_btn))
-            open_file_btn = button("Open", "ghost")
-            open_file_btn.clicked.connect(
-                lambda _checked=False, f=skill_file: QDesktopServices.openUrl(
-                    QUrl.fromLocalFile(f)
-                )
-            )
-            row.add(open_file_btn)
-            row.add(copy_btn)
+            group.add_row(self._skill_row(s))
+        root = skills_module.skills_root()
+        for name in sorted(grouped, key=str.lower):
+            members = grouped[name]
+            is_open = name in self._expanded
+            preview = ", ".join(m["slug"] for m in members[:4]) + (", ..." if len(members) > 4 else "")
+            row = SettingRow(f"{name}/", f"Group of {len(members)}: {preview}")
+            row.add(self._open_button(str(root / name)))
+            toggle = button("Hide" if is_open else "Show", "secondary")
+            toggle.clicked.connect(lambda _checked=False, n=name: self._toggle_group(n))
+            row.add(toggle)
             group.add_row(row)
+            if is_open:
+                for member in members:
+                    group.add_row(self._skill_row(member, indent=True))
 
     # --- lifecycle -------------------------------------------------------
 

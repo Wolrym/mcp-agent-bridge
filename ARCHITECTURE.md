@@ -155,6 +155,11 @@ bundled file. `core.skills.pack()` / `tools/pack_skill.py` / the guide's
 "Pack as .zip" button zip one skill as `<name>/SKILL.md ...` - the layout
 Notion's "Upload skill" and other agents accept.
 
+The setup guide's Skills page shows the same view an agent gets: global
+skills with groups that open in place (Show), and - for the active
+project or any folder - that project's instruction files and skills, with
+overrides marked. Every row has Open, Pack and Copy text.
+
 ### Startup, ports and logs
 
 Ports are probed before uvicorn binds them; a busy port produces one
