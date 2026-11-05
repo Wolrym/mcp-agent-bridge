@@ -71,6 +71,9 @@ Windows, shell = cmd.exe. Деталі: README.md, ARCHITECTURE.md.
   animation/, frontend/ переїхали в bin/ як є, legacy -> bin/legacy.
   Export... (вибрані скіли: один zip з папками або zip на скіл),
   pack_skill.py --all/--separate; в guide - команда встановлення.
+- Іконка на таскбарі (порожня сторінка): вікно тепер має повний набір
+  AppUserModel (ID, relaunch command/icon/name, gui/taskbar.py), ярлики
+  (папка, Start menu, desktop) - той самий ID. Ярлики перестворено.
 
 ## Чекає на користувача
 
