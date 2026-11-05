@@ -188,7 +188,15 @@ everything up as soon as the panel opens.
 Colours live in `gui/widgets/tokens.py`; theme.qss refers to them as
 `@name` and painted widgets (switches, icons, the glow) read them
 directly. Controls have a brighter top edge than bottom; the orange of
-the icon is only an accent (selected page, focus ring).
+the icon is only an accent (selected page, focus ring, a faint glow at
+the top of the content panel). Status pills are all the same quiet
+graphite; only their dot carries the colour.
+
+Widget gotcha: never call `setVisible(True)`/`show()` on a widget that
+has no parent yet - Qt opens it as a tiny top-level window for a moment,
+which on Windows looks like a burst of flashing windows whenever rows
+are rebuilt. Add it to a layout first, or only `hide()` it.
+`gui_controls_test.py` fails if any stray window appears.
 
 ## Tests
 

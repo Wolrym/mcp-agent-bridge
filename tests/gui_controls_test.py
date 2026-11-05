@@ -4,7 +4,9 @@ Builds the real window (no servers are started) and asserts that:
   * the master button exists, is compact, and flips its own label;
   * the autostart switch round-trips through the settings store;
   * the scroll viewport is transparent, which is what kept the shell's
-    bottom-left corner rounded.
+    bottom-left corner rounded;
+  * building rows (startup, settings refresh, setup guide) never flashes
+    a widget as its own little top-level window.
 
 Run with:
     set "QT_QPA_PLATFORM=offscreen" && python tests\\gui_controls_test.py
@@ -27,7 +29,8 @@ _settings_file.write_text(
 )
 os.environ["MCP_SETTINGS_PATH"] = str(_settings_file)
 
-from PySide6.QtWidgets import QApplication  # noqa: E402
+from PySide6.QtCore import QEvent, QObject  # noqa: E402
+from PySide6.QtWidgets import QApplication, QDialog  # noqa: E402
 
 from core.config import settings  # noqa: E402
 from gui.app import _dark_palette, _load_theme  # noqa: E402
@@ -39,6 +42,24 @@ def main() -> int:
     app.setStyle("Fusion")
     app.setPalette(_dark_palette())
     app.setStyleSheet(_load_theme())
+
+    # Any widget shown while it has no parent becomes a window of its own:
+    # on Windows that is a tiny flashing "MCP Agent Bridge" window.
+    stray: list[str] = []
+
+    class StrayWindows(QObject):
+        def eventFilter(self, obj, event):  # noqa: N802 - Qt naming
+            if (
+                event.type() == QEvent.Show
+                and obj.isWidgetType()
+                and obj.isWindow()
+                and not isinstance(obj, (MainWindow, QDialog))
+            ):
+                stray.append(type(obj).__name__)
+            return False
+
+    stray_filter = StrayWindows()
+    app.installEventFilter(stray_filter)
 
     original = bool(settings.get("gui", "autostart", default=False))
     window = MainWindow()
@@ -126,6 +147,19 @@ def main() -> int:
         all(area.viewport().autoFillBackground() is False for area in areas),
     )
     check("shell is the rounded surface", window._shell.objectName() == "windowShell")
+
+    # --- no stray windows --------------------------------------------------
+    from gui.widgets.setup_guide import SetupGuideDialog
+
+    app.processEvents()
+    window.refresh()
+    app.processEvents()
+    guide = SetupGuideDialog(window)
+    for index in range(guide.page_count()):
+        guide.show_page(index)
+    app.processEvents()
+    check("no stray top-level windows", not stray, ", ".join(stray[:5]))
+    guide.deleteLater()
 
     window.close()
 

@@ -583,8 +583,11 @@ class SettingRow(QWidget):
             self._description = ElidedLabel(description, "rowMono")
         else:
             self._description = label(description, "rowDescription")
-        self._description.setVisible(bool(description))
         text.addWidget(self._description)
+        # hide() only: setVisible(True) on a widget that has no parent yet
+        # opens it as its own top-level window for a moment.
+        if not description:
+            self._description.hide()
         layout.addLayout(text, 1)
 
         self._controls = QHBoxLayout()
@@ -641,8 +644,9 @@ class Group(QWidget):
 
         self._caption = label(caption, "caption")
         self._caption.setContentsMargins(2, 0, 0, 0)
-        self._caption.setVisible(bool(caption))
         outer.addWidget(self._caption)
+        if not caption:
+            self._caption.hide()
 
     def header_extra(self, widget: QWidget) -> QWidget:
         self._extras.addWidget(widget, 0, Qt.AlignVCenter)
@@ -714,8 +718,9 @@ class Page(QWidget):
         titles.setSpacing(4)
         titles.addWidget(label(title, "pageTitle"))
         self._subtitle = label(subtitle, "pageSubtitle")
-        self._subtitle.setVisible(bool(subtitle))
         titles.addWidget(self._subtitle)
+        if not subtitle:
+            self._subtitle.hide()
         head.addLayout(titles, 1)
         self._extras = QHBoxLayout()
         self._extras.setContentsMargins(0, 0, 0, 0)
