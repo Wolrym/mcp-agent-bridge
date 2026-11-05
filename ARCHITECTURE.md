@@ -13,7 +13,7 @@ Single Python codebase (3.10+), no PowerShell orchestration, no Node.
 run_core.py                 headless entry point + ServerSupervisor + port checks
 start.bat / start_gui.bat   launchers (with a console)
 tools/make_shortcuts.py     creates the windowless and the debug shortcut
-tools/pack_skill.py         packs one skill folder into a .zip (Notion upload)
+tools/pack_skill.py         zips skills: one, several (one zip or one per skill) or --all
 assets/                     app icon (.ico for Windows, .png)
 config/settings.json        runtime settings (gitignored)
 core/
@@ -42,11 +42,13 @@ gui/
   main_window.py            panel layout and every action
   theme.qss                 stylesheet; colours are @tokens
   widgets/                  tokens (colours), icons, primitives, frameless
-                            chrome, setup guide
-skills/legacy/              the original skill (kept as it was, not listed as top level)
-skills/bin/                 parked skills, never listed (gitignored)
-skills/mcp-coding-agent-v2/ the same skill, updated for the current tools
-skills/<group>/             third-party skills, local only (gitignored)
+                            chrome, setup guide, skill export dialog
+skills/core/                the bridge's own skills (mcp-coding-agent-v2 is versioned)
+skills/.agents/skills/      skills installed with `npx skills add` (gitignored)
+skills/categories.json      optional: category -> skill names (gitignored)
+skills/bin/                 parked skills, never listed (gitignored except legacy/)
+skills/bin/legacy/          the original skill, kept as it was
+skills/<group>/             older layout: a folder of skill folders (gitignored)
 tests/                      runnable check scripts, no framework
 ```
 
@@ -137,11 +139,26 @@ streams to a file under `.mcp-runs/`:
 Two scopes, listed together, the way Claude Code, OpenCode and
 Antigravity do it:
 
-- **Global** - `skills/` in the bridge. Top-level skills are shown
-  directly; a folder without a `SKILL.md` that contains skill folders is a
-  group (`design/`, `legacy/`, ...), shown collapsed to one line and
-  opened with `list_skills(group=...)`. `skills/bin/` is never listed:
-  park a skill there to switch it off without deleting it.
+- **Global** - `skills/` in the bridge, from three places:
+  - `skills/core/` - the bridge's own skills;
+  - `skills/.agents/skills/` - skills installed with Vercel's skills CLI.
+    Run `npx skills add <owner/repo> -a universal` with `skills/` as the
+    current folder: the CLI treats it as a project, so skills land in
+    `.agents/skills/<name>` and `skills-lock.json` sits next to them;
+    `npx skills list / update / remove` work there unchanged. The CLI owns
+    that folder, so the bridge never reorganises it;
+  - any other folder in `skills/` (the older layout): a folder with a
+    `SKILL.md` is a skill, a folder of skill folders is a group.
+
+  On a name clash `core/` wins over an installed copy, so updating a
+  third-party collection cannot replace the bridge's own instructions.
+  Groups are shown collapsed to one line and opened with
+  `list_skills(group=...)`. Flat installed skills get groups from an
+  optional `skills/categories.json` (`{"design": ["impeccable", ...]}`,
+  keys starting with `_` are comments, a broken file is ignored); a
+  category behaves exactly like a folder group, including
+  `get_skill("design/impeccable")`. `skills/bin/` is never listed: park a
+  skill there to switch it off without deleting it.
 - **Project** - `.agents/skills`, `.agent/skills`, `.claude/skills`,
   `.opencode/skills` inside the project. `list_skills(project=...)` and
   `get_skill(name, project=...)` include them, and a project skill wins a
@@ -151,14 +168,19 @@ Antigravity do it:
 (`AGENTS.md`, `CLAUDE.md`, `GEMINI.md`) with their size, so the agent
 reads them before its first change; the skills tell it to. Front matter
 supports YAML block scalars (`description: >-`). `get_skill` lists every
-bundled file. `core.skills.pack()` / `tools/pack_skill.py` / the guide's
-"Pack as .zip" button zip one skill as `<name>/SKILL.md ...` - the layout
-Notion's "Upload skill" and other agents accept.
+bundled file. `core.skills.pack()` zips one skill as `<name>/SKILL.md ...` -
+the layout Notion's "Upload skill" and other agents accept;
+`core.skills.export()` zips several: one archive with a folder per skill
+(unpack into any `.agents/skills`) or one zip per skill. The guide's Pack
+and Export... buttons and `tools/pack_skill.py` (`--all`, `--separate`)
+use them.
 
 The setup guide's Skills page shows the same view an agent gets: global
 skills with groups that open in place (Show), and - for the active
 project or any folder - that project's instruction files and skills, with
-overrides marked. Every row has Open, Pack and Copy text.
+overrides marked. Every row has Open, Pack and Copy text. An "Add skills"
+group holds the ready `npx skills add` command for the skills folder and
+opens (or creates) `categories.json`.
 
 ### Startup, ports and logs
 

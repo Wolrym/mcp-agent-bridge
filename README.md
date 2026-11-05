@@ -90,7 +90,7 @@ token and is recreated on first launch), `logs/`, `.mcp-runs/`,
 | `wait_process` | Waits for a job and returns early when it ends or a line matches `until` (regex); `tail` for the last lines |
 | `get_output`, `stop_process`, `list_processes` | Job output (paged or `tail`), stop the whole process tree, list jobs |
 | `get_active_project` | The default folder, whether outside access is allowed, other projects |
-| `list_skills`, `get_skill` | Global skills with groups (`design/...`) plus project skills (`.agents/skills`, `.agent/skills`, `.claude/skills`, `.opencode/skills`) and the project's `AGENTS.md` / `CLAUDE.md` / `GEMINI.md`; `skills/bin/` is hidden. `tools/pack_skill.py` zips one skill |
+| `list_skills`, `get_skill` | Global skills - the bridge's own (`skills/core/`) and those installed with `npx skills` (`skills/.agents/skills/`), grouped by folder or by `skills/categories.json` - plus project skills (`.agents/skills`, `.agent/skills`, `.claude/skills`, `.opencode/skills`) and the project's `AGENTS.md` / `CLAUDE.md` / `GEMINI.md`; `skills/bin/` is hidden. `tools/pack_skill.py` zips one, several or all skills |
 | `notify_user` | Telegram "task finished" message, if configured |
 
 Every result is sent once, as plain text. (FastMCP's default also sends a
