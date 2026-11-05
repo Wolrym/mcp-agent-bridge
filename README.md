@@ -5,10 +5,6 @@ one for files, one for commands, background jobs and skills - with token
 auth, live project switching, an undo history and an optional Cloudflare
 Tunnel for remote clients. Pure Python, with a PySide6 control panel.
 
-> **Folder name.** On the author's PC the repository still lives in
-> `notion-mcp-agent-bridge_v2`; it will be renamed to `mcp-agent-bridge`
-> later. Nothing in the code depends on the folder name.
-
 See `ARCHITECTURE.md` for the design and the reasoning behind it.
 
 ## Works with
