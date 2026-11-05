@@ -1,6 +1,6 @@
 # STATE: ремейк MCP-моста (mcp-agent-bridge)
 
-Оновлено: 2026-11-05 15:30. Задачі (slug для тегів): `remake` (закрита, v2.0),
+Оновлено: 2026-11-05 16:20. Задачі (slug для тегів): `remake` (закрита, v2.0),
 `skills` (скіли: глобальні + проєктні).
 
 ## Проєкт
@@ -54,16 +54,21 @@ Windows, shell = cmd.exe. Деталі: README.md, ARCHITECTURE.md.
   у скілах розділ "Getting oriented" (спершу AGENTS.md). Notion-сторінки
   скілів оновлено. Чому "двічі": FastMCP віддавав і text, і
   structuredContent - тепер structured_output=False.
+- Раунд 8 (cp/skills/02-guide): Setup guide > Skills: перемикач Global /
+  Active project / Other folder; групи розгортаються (Show/Hide); у
+  проєкті - AGENTS.md і проєктні скіли з позначкою override; у кожного
+  рядка Open / Pack / Copy text. Користувач перевірив раунд 7 - ок.
 
 ## Чекає на користувача
 
-- Перезапустити панель, щоб нові list_skills / pack діяли; новий чат, щоб
-  Notion побачив нові описи інструментів (кешує їх на чат).
-- Перевірити один .zip через Notion: Library > Skills > Upload skill.
-- Пуш на GitHub - коли все доробимо (сказав сам). Перейменування папки - сам.
+- Перезапустити панель і глянути Setup guide > Skills.
+- Далі сам: перейменувати папку в mcp-agent-bridge (закрити панель,
+  rename, make_shortcuts.py, перевибрати проєкт, прибрати примітку в
+  README) і запушити: git push origin main; git push origin v1.0 v2.0.
+- Старий/v2 GUI (gui/main_window_v2.py, setup_guide_v2.py,
+  start_gui_v2.bat, gitignored) - не чіпати: користувач хоче колись
+  зробити скріни для роадмапу.
 - Вимкнути File backups на сторінці Projects (сам).
-- Чи видаляти локальні (gitignored) gui/main_window_v2.py,
-  gui/widgets/setup_guide_v2.py, start_gui_v2.bat.
 
 ## Наступний крок
 
