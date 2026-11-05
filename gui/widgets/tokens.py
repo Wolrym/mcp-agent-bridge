@@ -84,11 +84,15 @@ COLORS = {
     "neutral_text": "#a1a1aa",
     "neutral_bg": "#151517",
     "neutral_edge": "#25252a",
+    # status pills
+    "pill_bg": "#141416",
+    "pill_edge": "#232327",
+    "pill_hi": "#323237",
 }
 
 # The glow behind the top of the content panel: RGB, peak alpha (0-255).
-GLOW_RGB = (52, 92, 190)
-GLOW_ALPHA = 34
+GLOW_RGB = (226, 97, 47)
+GLOW_ALPHA = 22
 
 TONE_DOT = {
     "neutral": COLORS["neutral"],

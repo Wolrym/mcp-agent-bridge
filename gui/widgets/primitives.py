@@ -122,9 +122,14 @@ class Badge(QLabel):
         painter = QPainter(self)
         painter.setRenderHint(QPainter.Antialiasing, True)
         painter.setPen(Qt.NoPen)
-        painter.setBrush(QColor(TONE_DOT.get(str(self.property("badge")), TONE_DOT["neutral"])))
-        size = 6.0
-        painter.drawEllipse(QRectF(9.0, (self.height() - size) / 2, size, size))
+        colour = QColor(TONE_DOT.get(str(self.property("badge")), TONE_DOT["neutral"]))
+        centre_x, centre_y = 12.0, self.height() / 2
+        halo = QColor(colour)
+        halo.setAlpha(46)
+        painter.setBrush(halo)
+        painter.drawEllipse(QRectF(centre_x - 5.0, centre_y - 5.0, 10.0, 10.0))
+        painter.setBrush(colour)
+        painter.drawEllipse(QRectF(centre_x - 3.0, centre_y - 3.0, 6.0, 6.0))
 
 
 class Switch(QAbstractButton):
