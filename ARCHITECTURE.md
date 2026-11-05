@@ -12,7 +12,7 @@ Single Python codebase (3.10+), no PowerShell orchestration, no Node.
 ```
 run_core.py                 headless entry point + ServerSupervisor + port checks
 start.bat / start_gui.bat   launchers (with a console)
-tools/make_shortcuts.py     creates the windowless and the debug shortcut
+tools/make_shortcuts.py     windowless + debug shortcut (folder, Start menu), with the app ID
 tools/pack_skill.py         zips skills: one, several (one zip or one per skill) or --all
 assets/                     app icon (.ico for Windows, .png)
 config/settings.json        runtime settings (gitignored)
@@ -40,6 +40,8 @@ servers/
 gui/
   app.py                    QApplication bootstrap: theme, log sinks, single instance
   main_window.py            panel layout and every action
+  taskbar.py                Windows taskbar identity: AppUserModelID, relaunch
+                            icon/name on the window, ID stamped into shortcuts
   theme.qss                 stylesheet; colours are @tokens
   widgets/                  tokens (colours), icons, primitives, frameless
                             chrome, setup guide, skill export dialog

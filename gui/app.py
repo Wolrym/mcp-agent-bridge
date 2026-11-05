@@ -30,7 +30,9 @@ from gui.widgets import tokens  # noqa: E402
 THEME_PATH = Path(__file__).resolve().parent / "theme.qss"
 LOG_DIR = PROJECT_ROOT / "logs"
 ICON_DIR = PROJECT_ROOT / "assets"
-APP_ID = "MCPAgentBridge.ControlPanel"
+from gui import taskbar  # noqa: E402
+
+APP_ID = taskbar.APP_ID
 
 
 def _app_icon() -> QIcon:
@@ -176,6 +178,9 @@ def main(argv: list | None = None) -> int:
         window = MainWindow()
 
     window.show()
+    # The full taskbar identity (icon, name, relaunch) on the window itself;
+    # an ID alone leaves Windows 11 drawing a blank page on the button.
+    taskbar.apply_to_window(int(window.winId()))
 
     # --start is the one-off way in; the autostart toggle on the panel is
     # the persistent one. Either brings up the servers and the tunnel.

@@ -3,6 +3,10 @@
     python tools\\make_shortcuts.py             in the project folder
     python tools\\make_shortcuts.py --desktop   ...and on the desktop too
 
+Both go into the project folder and the Start menu (and the desktop with
+--desktop), stamped with the panel's AppUserModelID, so the taskbar files
+the running window under the shortcut and shows its icon.
+
 "MCP Agent Bridge"          pythonw.exe -m gui.app: no console window.
                             Log lines go to logs\\bridge.log.
 "MCP Agent Bridge (debug)"  cmd /k python -m gui.app: a console that shows
@@ -20,12 +24,13 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(ROOT))
 ICON = ROOT / "assets" / "icon.ico"
 NAME = "MCP Agent Bridge"
 
 _POWERSHELL = r"""
 $shell = New-Object -ComObject WScript.Shell
-$folders = @($env:SC_FOLDER)
+$folders = @($env:SC_FOLDER, [Environment]::GetFolderPath('Programs'))
 if ($env:SC_DESKTOP -eq '1') { $folders += [Environment]::GetFolderPath('Desktop') }
 foreach ($folder in $folders) {
   foreach ($kind in @('normal', 'debug')) {
@@ -70,7 +75,20 @@ def main(argv: list) -> int:
         env=env, capture_output=True, text=True,
     )
     print((result.stdout + result.stderr).strip())
-    return result.returncode
+    if result.returncode:
+        return result.returncode
+    from gui import taskbar
+
+    for line in result.stdout.splitlines():
+        if line.startswith("created "):
+            link = line[len("created "):].strip()
+            try:
+                taskbar.stamp_shortcut(link)
+            except OSError as exc:
+                print(f"  no taskbar ID on {link}: {exc}")
+                return 1
+    print(f"taskbar ID {taskbar.APP_ID} written to every shortcut")
+    return 0
 
 
 if __name__ == "__main__":
