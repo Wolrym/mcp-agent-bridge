@@ -362,15 +362,16 @@ def register(mcp) -> None:
     def list_skills(query: str = "", group: str = "", project: str = "") -> str:
         """List the available skills (instructions for specific kinds of work).
 
-        Global skills (the bridge's own, groups collapsed to one line) and,
-        with `project`, that project's skills and its instruction files
+        Global skills (the bridge's own and those installed with
+        `npx skills`; groups and categories collapsed to one line) and, with
+        `project`, that project's skills and its instruction files
         (AGENTS.md, CLAUDE.md, GEMINI.md). Call it with `project` before the
         first change in a project. Re-scanned on every call.
 
         Args:
             query: Case-insensitive filter on name and description, across
                 every group.
-            group: Show the skills of one group, e.g. "design".
+            group: Show the skills of one group or category, e.g. "design".
             project: Absolute project folder: adds its .agents/skills,
                 .agent/skills, .claude/skills, .opencode/skills and its
                 instruction files.
@@ -403,7 +404,9 @@ def register(mcp) -> None:
             return "\n".join([f"Group {wanted}: {len(found)} skill(s)", ""]
                              + [skills.describe(s) for s in found])
 
-        core = [s for s in found if not s["group"] and s["origin"] == "bridge"]
+        top = [s for s in found if not s["group"] and s["origin"] == "bridge"]
+        core = [s for s in top if s["source"] != "installed"]
+        installed = [s for s in top if s["source"] == "installed"]
         local = [s for s in found if s["origin"] == "project"]
         groups: dict = {}
         for s in found:
@@ -412,6 +415,9 @@ def register(mcp) -> None:
 
         lines = [f"Global skills ({skills.skills_root()}):", ""]
         lines += [skills.describe(s) for s in core] or ["(no top-level skills)"]
+        if installed:
+            lines += ["", "Installed with npx skills:"]
+            lines += [skills.describe(s) for s in installed]
         if groups:
             lines += ["", "Groups (list_skills(group=...) shows descriptions):"]
             for name, members in sorted(groups.items()):
@@ -430,7 +436,7 @@ def register(mcp) -> None:
                 for path, size in instructions
             ]
         if local:
-            shadowed = {s["slug"].lower() for s in core} | {s["name"].lower() for s in core}
+            shadowed = {s["slug"].lower() for s in top} | {s["name"].lower() for s in top}
             lines.append("Project skills (they win over a global skill with the same name):")
             for s in local:
                 note = "  [overrides the global one]" if (

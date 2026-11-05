@@ -318,6 +318,43 @@ def test_skills() -> None:
         names = sorted(packed.namelist())
     check("pack keeps the folder layout", names == ["pretty/SKILL.md", "pretty/references/a.md"], str(names))
 
+    # Central layout: core/ for our skills, .agents/skills from `npx skills`,
+    # categories.json groups flat installed skills.
+    skill(SKILLS / "core" / "ours", "ours", "Bridge skill.")
+    skill(SKILLS / ".agents" / "skills" / "ours", "ours", "Installed copy.")
+    skill(SKILLS / ".agents" / "skills" / "fetched", "fetched", "From GitHub.")
+    skill(SKILLS / ".agents" / "skills" / "shiny", "shiny", "Shiny UI.")
+    (SKILLS / "skills-lock.json").write_text("{}", encoding="utf-8")
+    (SKILLS / "categories.json").write_text('{"_comment": "x", "look": ["shiny"]}', encoding="utf-8")
+    listing = call(TERM, "list_skills")
+    check("core/ skills are listed", "Bridge skill." in listing and "- core/" not in listing, listing[:300])
+    check("installed skills are listed", "Installed with npx skills" in listing and "From GitHub." in listing, listing)
+    check("core/ wins over an installed copy", "Installed copy." not in listing)
+    check("a category collapses like a group", "look/" in listing and "Shiny UI." not in listing, listing)
+    look = call(TERM, "list_skills", group="look")
+    check("a category opens with group=", "Shiny UI." in look, look)
+    check("a categorised skill loads by category/name", "Shiny UI." in call(TERM, "get_skill", name="look/shiny"))
+    check("get_skill takes the core/ copy", "Bridge skill." in call(TERM, "get_skill", name="ours"))
+    (SKILLS / "categories.json").write_text("{broken", encoding="utf-8")
+    check("a broken categories.json is ignored", "Shiny UI." in call(TERM, "list_skills"))
+
+    # Export: one zip with a folder per skill, or one zip per skill.
+    out = TEMP / "export"
+    picked = [SKILLS / "core" / "ours", SKILLS / ".agents" / "skills" / "fetched"]
+    combined = skills_module.export(picked, out)
+    with zipfile.ZipFile(combined[0]) as packed:
+        names = sorted(packed.namelist())
+    check("export: one zip with both folders", len(combined) == 1
+          and names == ["fetched/SKILL.md", "ours/SKILL.md"], str(names))
+    single = skills_module.export(picked, out / "each", separate=True)
+    check("export: one zip per skill", sorted(p.name for p in single) == ["fetched.zip", "ours.zip"], str(single))
+    try:
+        skills_module.export([SKILLS / "core" / "ours", SKILLS / ".agents" / "skills" / "ours"], out)
+        clash_refused = False
+    except ValueError:
+        clash_refused = True
+    check("export: same folder name twice is refused", clash_refused)
+
 
 def main() -> int:
     tests = [
