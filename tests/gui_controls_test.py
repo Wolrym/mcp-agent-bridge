@@ -181,7 +181,10 @@ def main() -> int:
         )
 
     lab = Path(tempfile.mkdtemp(prefix="mcp-gui-skills-"))
-    make_skill(lab / "skills" / "top", "top")
+    make_skill(lab / "skills" / "core" / "top", "top")
+    make_skill(lab / "skills" / ".agents" / "skills" / "got", "got")
+    make_skill(lab / "skills" / ".agents" / "skills" / "neat", "neat")
+    (lab / "skills" / "categories.json").write_text('{"look": ["neat"]}', encoding="utf-8")
     make_skill(lab / "skills" / "grp" / "alpha", "alpha")
     make_skill(lab / "skills" / "grp" / "beta", "beta")
     make_skill(lab / "skills" / "bin" / "parked", "parked")
@@ -192,11 +195,22 @@ def main() -> int:
 
     guide.refresh()
     shown = titles(guide._skills_group)
-    check("guide: groups closed, bin/ hidden", shown == ["top", "grp/"], str(shown))
+    check("guide: groups closed, bin/ hidden", shown == ["top", "got", "grp/", "look/"], str(shown))
+    check("guide: install command points at the skills root",
+          str(lab / "skills") in guide._install_row.value() and "npx skills add" in guide._install_row.value())
     check("guide: no project group in global scope", guide._project_group.isHidden())
     guide._toggle_group("grp")
     shown = titles(guide._skills_group)
-    check("guide: Show opens a group", shown == ["top", "grp/", "alpha", "beta"], str(shown))
+    check("guide: Show opens a group", shown == ["top", "got", "grp/", "alpha", "beta", "look/"], str(shown))
+    from gui.widgets.skill_export import SkillExportDialog
+    from core import skills as skills_module
+
+    export_dialog = SkillExportDialog(skills_module.discover(), guide)
+    check("export dialog lists every global skill", len(export_dialog._boxes) == 5, str(len(export_dialog._boxes)))
+    check("export starts with nothing chosen", not export_dialog.export_btn.isEnabled())
+    export_dialog._set_all(True)
+    check("select all enables export", export_dialog.export_btn.isEnabled() and len(export_dialog.chosen()) == 5)
+    export_dialog.deleteLater()
     guide.set_skill_scope("folder", str(project_dir))
     shown = titles(guide._project_group)
     check("guide: project instructions and skills", shown == ["AGENTS.md", "top"], str(shown))

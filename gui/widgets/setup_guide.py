@@ -296,9 +296,10 @@ class SetupGuideDialog(QDialog):
         instructions.add(
             _step(
                 3,
-                "Grouped skills (design/, animation/, ...) are listed "
-                "collapsed; agents open a group with list_skills(group=...). "
-                "Here, Show opens a group.",
+                "The bridge's own skills live in skills/core/. Skills from "
+                "GitHub are installed with the skills CLI (npx skills) into "
+                "skills/.agents/skills/ - copy the command below; npx skills "
+                "list / update / remove work in the same folder.",
             )
         )
         instructions.add(
@@ -314,13 +315,36 @@ class SetupGuideDialog(QDialog):
         instructions.add(
             _step(
                 5,
-                "Skills you want to keep but switch off go into the bin/ folder: "
-                "agents never see them. Pack turns a skill folder into a .zip "
-                "in Downloads for uploading elsewhere (Notion: Library > "
-                "Skills > More ways to add a skill > Upload skill).",
+                "Groups (folders like design/, or categories from "
+                "categories.json) are listed collapsed; agents open one with "
+                "list_skills(group=...). Skills you want to keep but switch "
+                "off go into skills/bin/: agents never see them.",
+            )
+        )
+        instructions.add(
+            _step(
+                6,
+                "Export zips chosen skills into Downloads: one archive to "
+                "unpack into any .agents/skills, or one per skill for upload "
+                "forms (Notion: Library > Skills > More ways to add a skill > "
+                "Upload skill).",
             )
         )
         page.add(instructions)
+
+        add_group = Group("Add skills")
+        self._install_row = CopyRow("Install from GitHub (run in a terminal)")
+        add_group.add_row(self._install_row)
+        categories_row = SettingRow(
+            "Categories",
+            "categories.json groups flat skills, e.g. {\"design\": [\"impeccable\"]}. "
+            "Folders are not moved.",
+        )
+        categories_btn = button("Open", "ghost", "Open categories.json (created if missing)")
+        categories_btn.clicked.connect(self._open_categories)
+        categories_row.add(categories_btn)
+        add_group.add_row(categories_row)
+        page.add(add_group)
 
         # Which project's view to show: what an agent gets with
         # list_skills() or list_skills(project=...).
@@ -349,6 +373,9 @@ class SetupGuideDialog(QDialog):
         reload_btn = button("Reload", "ghost")
         reload_btn.clicked.connect(self._load_skills)
         self._skills_group.header_extra(reload_btn)
+        export_btn = button("Export...", "ghost", "Zip chosen skills into Downloads")
+        export_btn.clicked.connect(self._export_skills)
+        self._skills_group.header_extra(export_btn)
         pack_btn = button("Pack folder...", "ghost", "Zip any skill folder for uploading to another agent")
         pack_btn.clicked.connect(lambda: self._pack_skill())
         self._skills_group.header_extra(pack_btn)
@@ -459,6 +486,36 @@ class SetupGuideDialog(QDialog):
     def _open_skills_folder(self) -> None:
         root = skills_module.skills_root()
         QDesktopServices.openUrl(QUrl.fromLocalFile(str(root)))
+
+    def _open_categories(self) -> None:
+        from PySide6.QtWidgets import QMessageBox
+
+        try:
+            path = skills_module.ensure_categories_file()
+        except OSError as exc:
+            QMessageBox.warning(self, "Could not create categories.json", str(exc))
+            return
+        QDesktopServices.openUrl(QUrl.fromLocalFile(str(path)))
+
+    def _export_skills(self) -> None:
+        from PySide6.QtWidgets import QMessageBox
+
+        from gui.widgets.skill_export import SkillExportDialog
+
+        _title, folder = self._scope_project()
+        dialog = SkillExportDialog(skills_module.discover(folder or None), self)
+        if dialog.exec() != QDialog.Accepted or not dialog.written:
+            return
+        written = dialog.written
+        box = QMessageBox(self)
+        box.setWindowTitle("Skills exported")
+        names = ", ".join(p.name for p in written[:6]) + (", ..." if len(written) > 6 else "")
+        box.setText(f"Saved {len(written)} zip(s) to {written[0].parent}: {names}")
+        show = box.addButton("Show in folder", QMessageBox.ActionRole)
+        box.addButton(QMessageBox.Close)
+        box.exec()
+        if box.clickedButton() is show:
+            QDesktopServices.openUrl(QUrl.fromLocalFile(str(written[0].parent)))
 
     def _pack_skill(self, folder: str = "") -> None:
         """Zip one skill folder into Downloads, ready for an upload form."""
@@ -574,6 +631,8 @@ class SetupGuideDialog(QDialog):
 
     def _load_skills(self) -> None:
         title, folder = self._scope_project()
+        root = skills_module.skills_root()
+        self._install_row.set_value(f'cd /d "{root}" && {skills_module.INSTALL_COMMAND}')
         found = skills_module.discover(folder or None)
         global_skills = [s for s in found if s["origin"] == "bridge"]
         project_skills = [s for s in found if s["origin"] != "bridge"]
@@ -627,24 +686,28 @@ class SetupGuideDialog(QDialog):
             if s.get("group"):
                 grouped.setdefault(s["group"], []).append(s)
         group.set_title(f"Global skills ({len(own) + sum(len(v) for v in grouped.values())})")
-        group.set_caption("Hidden from agents: the bin/ folder." if global_skills else "")
+        group.set_caption(
+            "core/ wins over an installed skill with the same name. Hidden from agents: bin/."
+            if global_skills else ""
+        )
 
         if not global_skills:
             group.add_row(SettingRow(
                 "No skills found",
-                f"Place skill folders (each with a SKILL.md) in {skills_module.skills_root()}",
+                f"Put skill folders (each with a SKILL.md) into {root / skills_module.CORE_DIR} "
+                "or install some with the command above.",
             ))
             return
 
         for s in own:
-            group.add_row(self._skill_row(s))
-        root = skills_module.skills_root()
+            group.add_row(self._skill_row(s, note="[installed]" if s.get("source") == "installed" else ""))
         for name in sorted(grouped, key=str.lower):
             members = grouped[name]
             is_open = name in self._expanded
             preview = ", ".join(m["slug"] for m in members[:4]) + (", ..." if len(members) > 4 else "")
-            row = SettingRow(f"{name}/", f"Group of {len(members)}: {preview}")
-            row.add(self._open_button(str(root / name)))
+            kind = "Group" if (root / name).is_dir() else "Category"
+            row = SettingRow(f"{name}/", f"{kind} of {len(members)}: {preview}")
+            row.add(self._open_button(str(skills_module.group_folder(name))))
             toggle = button("Hide" if is_open else "Show", "secondary")
             toggle.clicked.connect(lambda _checked=False, n=name: self._toggle_group(n))
             row.add(toggle)
