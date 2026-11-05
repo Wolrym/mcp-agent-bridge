@@ -61,10 +61,10 @@ Windows, shell = cmd.exe. Деталі: README.md, ARCHITECTURE.md.
 
 ## Чекає на користувача
 
-- Перезапустити панель і глянути Setup guide > Skills.
-- Далі сам: перейменувати папку в mcp-agent-bridge (закрити панель,
-  rename, make_shortcuts.py, перевибрати проєкт, прибрати примітку в
-  README) і запушити: git push origin main; git push origin v1.0 v2.0.
+- Папку перейменовано в C:\Users\Dima\VSCodeProjects\tools\mcp-agent-bridge
+  (ярлики оновлено, примітку з README прибрано - 229589a).
+- Пуш на GitHub робить сам: git push origin main (уся історія) і
+  git push origin v1.0 v2.0.
 - Старий/v2 GUI (gui/main_window_v2.py, setup_guide_v2.py,
   start_gui_v2.bat, gitignored) - не чіпати: користувач хоче колись
   зробити скріни для роадмапу.
