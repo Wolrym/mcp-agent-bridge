@@ -693,12 +693,15 @@ class Page(QWidget):
 
     The column stops growing at a readable width and stays centred on
     wide windows. `scroll=False` is for pages whose content scrolls by
-    itself (the activity log).
+    itself (the activity log); `wide=True` lets such a page use the whole
+    window width.
     """
 
     MAX_WIDTH = 880
 
-    def __init__(self, title: str, subtitle: str = "", scroll: bool = True) -> None:
+    def __init__(
+        self, title: str, subtitle: str = "", scroll: bool = True, wide: bool = False
+    ) -> None:
         super().__init__()
         outer = QVBoxLayout(self)
         outer.setContentsMargins(0, 0, 0, 0)
@@ -709,7 +712,8 @@ class Page(QWidget):
         centre.setContentsMargins(0, 0, 0, 0)
         centre.setSpacing(0)
         column = QWidget()
-        column.setMaximumWidth(self.MAX_WIDTH)
+        if not wide:
+            column.setMaximumWidth(self.MAX_WIDTH)
         centre.addStretch(0)
         centre.addWidget(column, 1)
         centre.addStretch(0)

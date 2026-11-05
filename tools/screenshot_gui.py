@@ -62,6 +62,8 @@ def main(argv: list) -> int:
     for text, level in [("Listening on http://127.0.0.1:9500/mcp", "info"),
                         ("read_file(path=C:\\proj\\main.py)  0.02s", "info"),
                         ("run_command(command=npm test, cwd=C:\\proj)  12.40s", "info"),
+                        ("run_command(command=git status --short & git log --oneline -3 & git fetch -q origin & git status -sb | findstr \"##\" & git rev-list --count origin/main..main, cwd=C:\\Users\\Dima\\VSCodeProjects\\tools\\mcp-agent-bridge)  5.21s", "info"),
+                        ("Request failed error=\"dial tcp 127.0.0.1:9501: connectex: No connection could be made because the target machine actively refused it.\" dest=https://mcp-term.example.com/mcp", "warn"),
                         ("Blocked: taskkill /f /im python.exe", "warn")]:
         logs.log("files" if "read" in text else "terminal", text, level=level, kind="call")
 

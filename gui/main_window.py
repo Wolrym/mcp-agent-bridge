@@ -23,7 +23,6 @@ Button convention, kept narrow so nothing looks random:
 """
 from __future__ import annotations
 
-import html
 import time
 from collections import deque
 from concurrent.futures import ThreadPoolExecutor
@@ -38,7 +37,6 @@ from PySide6.QtWidgets import (
     QLineEdit,
     QMainWindow,
     QMessageBox,
-    QPlainTextEdit,
     QStackedWidget,
     QVBoxLayout,
     QWidget,
@@ -63,6 +61,7 @@ from gui.widgets.primitives import (
     label,
     repolish,
 )
+from gui.widgets.log_view import LogView
 from gui.widgets.setup_guide import SetupGuideDialog
 from gui.widgets.tokens import COLORS
 from run_core import ServerSupervisor
@@ -543,7 +542,12 @@ class MainWindow(QMainWindow):
         return page
 
     def _activity_page(self) -> Page:
-        page = Page("Activity", "Live output from the servers and the tunnel.", scroll=False)
+        page = Page(
+            "Activity",
+            "Tool calls, server and tunnel events. The full log is logs\\bridge.log.",
+            scroll=False,
+            wide=True,
+        )
         self._log_filter_control = Segmented(list(LOG_FILTERS), "all")
         self._log_filter_control.changed.connect(self._set_log_filter)
         page.header_extra(self._log_filter_control)
@@ -551,12 +555,7 @@ class MainWindow(QMainWindow):
         clear.clicked.connect(self._clear_logs)
         page.header_extra(clear)
 
-        self._log_view = QPlainTextEdit()
-        self._log_view.setObjectName("logView")
-        self._log_view.setReadOnly(True)
-        self._log_view.setMaximumBlockCount(2000)
-        self._log_view.setFocusPolicy(Qt.ClickFocus)
-        self._log_view.setLineWrapMode(QPlainTextEdit.NoWrap)
+        self._log_view = LogView(2000)
 
         holder = Group()
         holder.add_row(self._log_view, 1)
@@ -914,11 +913,8 @@ class MainWindow(QMainWindow):
     def _set_log_filter(self, key: str) -> None:
         self._log_filter = key
         self._log_view.clear()
-        for record in self._records:
-            if self._log_matches(record):
-                self._log_view.appendHtml(self._log_line(record))
-        self._log_view.verticalScrollBar().setValue(
-            self._log_view.verticalScrollBar().maximum()
+        self._log_view.add_many(
+            self._log_parts(record) for record in self._records if self._log_matches(record)
         )
 
     def _open_guide(self) -> None:
@@ -975,6 +971,9 @@ class MainWindow(QMainWindow):
     # --- rendering -------------------------------------------------------
 
     def _log_matches(self, record: dict) -> bool:
+        # Debug records (tunnel start-up chatter) go to the log file only.
+        if record.get("level") == "debug":
+            return False
         if self._log_filter == "calls":
             return record.get("kind") == "call"
         if self._log_filter == "problems":
@@ -982,28 +981,25 @@ class MainWindow(QMainWindow):
         return True
 
     @staticmethod
-    def _log_line(record: dict) -> str:
-        """One coloured line: time, source, message."""
+    def _log_parts(record: dict) -> tuple:
+        """Time, source, message and their colours for the log view."""
         stamp = time.strftime("%H:%M:%S", time.localtime(record.get("time", time.time())))
-        source = html.escape(str(record.get("source", "")))
-        message = html.escape(str(record.get("message", ""))).replace("\n", "<br>")
         level = record.get("level", "info")
         colour = {
             "warn": COLORS["warning_text"],
             "error": COLORS["danger_text"],
-            "debug": COLORS["faint"],
         }.get(level, COLORS["text"] if record.get("kind") == "call" else COLORS["text_2"])
-        pad = "&nbsp;" * max(2, 11 - len(source))
         return (
-            '<span style="color:%s">%s</span>&nbsp;&nbsp;'
-            '<span style="color:%s">%s</span>%s'
-            '<span style="color:%s">%s</span>'
-        ) % (COLORS["faint"], stamp, COLORS["muted"], source, pad, colour, message)
+            stamp,
+            str(record.get("source", "")),
+            str(record.get("message", "")),
+            (COLORS["faint"], COLORS["muted"], colour),
+        )
 
     def _append_log(self, record: dict) -> None:
         self._records.append(record)
         if self._log_matches(record):
-            self._log_view.appendHtml(self._log_line(record))
+            self._log_view.add(*self._log_parts(record))
 
     def refresh(self) -> None:
         data = settings.all()
