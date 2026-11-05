@@ -17,7 +17,7 @@ start_gui_v2.bat
 
 # Skills: only the bridge's own skills are versioned
 skills/*
-!skills/mcp-coding-agent/
+!skills/legacy/
 !skills/mcp-coding-agent-v2/
 
 # Raw user prompts saved by agents (may contain private details)
