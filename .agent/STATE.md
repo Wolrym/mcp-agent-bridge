@@ -1,6 +1,6 @@
 # STATE: ремейк MCP-моста (mcp-agent-bridge)
 
-Оновлено: 2026-11-05 17:00. Задачі (slug для тегів): `remake` (закрита, v2.0),
+Оновлено: 2026-11-05 19:00. Задачі (slug для тегів): `remake` (закрита, v2.0),
 `skills` (скіли: глобальні + проєктні).
 
 ## Проєкт
@@ -9,8 +9,10 @@
 Cloudflare Tunnel. Будь-який MCP-клієнт працює з файлами і терміналом на ПК.
 Windows, shell = cmd.exe. Деталі: README.md, ARCHITECTURE.md.
 Промпти користувача дослівно: .agent/prompts/ (не в git).
-Скіли для роботи: skills/mcp-coding-agent-brief (локально), дизайн: skills/design/*.
-Оригінальний скіл: skills/legacy/mcp-coding-agent. Вимкнені скіли: skills/bin/.
+Скіли: skills/core/ (свої: mcp-coding-agent-v2 у git, mcp-coding-agent-brief
+локально), skills/.agents/skills/ (npx skills add ... -a universal, cwd = skills),
+категорії - skills/categories.json. Оригінал: skills/bin/legacy/mcp-coding-agent.
+Вимкнені/старі (design, animation, frontend): skills/bin/.
 
 ## Жорсткі заборони
 
@@ -63,8 +65,18 @@ Windows, shell = cmd.exe. Деталі: README.md, ARCHITECTURE.md.
   префікс часу/рівня cloudflared прибрано, стартова діагностика -> debug
   (лише logs\bridge.log). Activity на всю ширину, перенос з відступом
   (QTextEdit). Кнопки вікна перемальовано (1 px, плавний hover).
+- Раунд 10 (cp/skills/03-central): централізовані глобальні скіли, сумісні з
+  Vercel `npx skills`: core/ (наші, виграють конфлікт імен), .agents/skills/
+  (CLI-власність, плоско), categories.json -> групи як папки; design/,
+  animation/, frontend/ переїхали в bin/ як є, legacy -> bin/legacy.
+  Export... (вибрані скіли: один zip з папками або zip на скіл),
+  pack_skill.py --all/--separate; в guide - команда встановлення.
 
 ## Чекає на користувача
+
+- Раунд 10: перезапустити панель (нові list_skills / guide Skills), у новому
+  чаті агенти побачать нові описи тулів. Встановлення: у skills/ виконати
+  npx skills add <owner/repo> -a universal.
 
 - Папку перейменовано в C:\Users\Dima\VSCodeProjects\tools\mcp-agent-bridge
   (ярлики оновлено, примітку з README прибрано - 229589a).
