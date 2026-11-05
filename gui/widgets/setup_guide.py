@@ -44,7 +44,7 @@ from gui.widgets.primitives import (
     separator,
 )
 
-SKILL_NAME = "mcp-coding-agent"
+SKILL_NAME = "mcp-coding-agent-v2"
 
 CONNECT_PROMPT = (
     "Connect an MCP server for me.\n"
@@ -281,7 +281,7 @@ class SetupGuideDialog(QDialog):
                 1,
                 "Agents connected to Terminal load skills themselves with "
                 "list_skills and get_skill - just ask for one by name, e.g. "
-                "'load the mcp-coding-agent skill'.",
+                "'load the mcp-coding-agent-v2 skill'.",
             )
         )
         instructions.add(
@@ -301,8 +301,19 @@ class SetupGuideDialog(QDialog):
         instructions.add(
             _step(
                 4,
-                "Project-specific skills go into <project>/.agents/skills/"
-                "<name>/SKILL.md; agents see them with list_skills(project=...).",
+                "Project skills go into <project>/.agents/skills/<name>/SKILL.md. "
+                "list_skills(project=...) shows them next to these global ones, "
+                "together with the project's AGENTS.md / CLAUDE.md; on a name "
+                "clash the project's skill wins.",
+            )
+        )
+        instructions.add(
+            _step(
+                5,
+                "Skills you want to keep but switch off go into the bin/ folder: "
+                "agents never see them. \"Pack as .zip\" turns any skill folder "
+                "into an archive for uploading elsewhere (Notion: Library > "
+                "Skills > More ways to add a skill > Upload skill).",
             )
         )
         page.add(instructions)
@@ -314,6 +325,9 @@ class SetupGuideDialog(QDialog):
         reload_btn = button("Reload", "ghost")
         reload_btn.clicked.connect(self._load_skills)
         self._skills_group.header_extra(reload_btn)
+        pack_btn = button("Pack as .zip", "ghost", "Zip a skill folder for uploading to another agent")
+        pack_btn.clicked.connect(self._pack_skill)
+        self._skills_group.header_extra(pack_btn)
         page.add(self._skills_group)
 
         page.finish()
@@ -421,6 +435,34 @@ class SetupGuideDialog(QDialog):
     def _open_skills_folder(self) -> None:
         root = skills_module.skills_root()
         QDesktopServices.openUrl(QUrl.fromLocalFile(str(root)))
+
+    def _pack_skill(self) -> None:
+        """Zip one skill folder into Downloads, ready for an upload form."""
+        from PySide6.QtWidgets import QFileDialog, QMessageBox
+
+        folder = QFileDialog.getExistingDirectory(
+            self, "Choose a skill folder", str(skills_module.skills_root())
+        )
+        if not folder:
+            return
+        downloads = Path.home() / "Downloads"
+        target_dir = downloads if downloads.is_dir() else Path.home()
+        try:
+            archive = skills_module.pack(folder, target_dir)
+        except (OSError, ValueError) as exc:
+            QMessageBox.warning(self, "Could not pack the skill", str(exc))
+            return
+        box = QMessageBox(self)
+        box.setWindowTitle("Skill packed")
+        box.setText(f"Saved {archive.name} ({archive.stat().st_size / 1024:.0f} KB) to {archive.parent}.")
+        box.setInformativeText(
+            "Notion: Library > Skills > More ways to add a skill > Upload skill."
+        )
+        show = box.addButton("Show in folder", QMessageBox.ActionRole)
+        box.addButton(QMessageBox.Close)
+        box.exec()
+        if box.clickedButton() is show:
+            QDesktopServices.openUrl(QUrl.fromLocalFile(str(archive.parent)))
 
     def _load_skills(self) -> None:
         from PySide6.QtCore import QTimer
