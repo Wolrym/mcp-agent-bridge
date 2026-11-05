@@ -1,6 +1,6 @@
 # STATE: ремейк MCP-моста (mcp-agent-bridge)
 
-Оновлено: 2026-11-05 16:20. Задачі (slug для тегів): `remake` (закрита, v2.0),
+Оновлено: 2026-11-05 17:00. Задачі (slug для тегів): `remake` (закрита, v2.0),
 `skills` (скіли: глобальні + проєктні).
 
 ## Проєкт
@@ -58,12 +58,19 @@ Windows, shell = cmd.exe. Деталі: README.md, ARCHITECTURE.md.
   Active project / Other folder; групи розгортаються (Show/Hide); у
   проєкті - AGENTS.md і проєктні скіли з позначкою override; у кожного
   рядка Open / Pack / Copy text. Користувач перевірив раунд 7 - ок.
+- Раунд 9 (cp/remake/06-polish): cloudflared "stream ... canceled by remote
+  with error code 0" = клієнт закрив стрім, нешкідливо -> не логуємо;
+  префікс часу/рівня cloudflared прибрано, стартова діагностика -> debug
+  (лише logs\bridge.log). Activity на всю ширину, перенос з відступом
+  (QTextEdit). Кнопки вікна перемальовано (1 px, плавний hover).
 
 ## Чекає на користувача
 
 - Папку перейменовано в C:\Users\Dima\VSCodeProjects\tools\mcp-agent-bridge
   (ярлики оновлено, примітку з README прибрано - 229589a).
-- Пуш на GitHub робить сам: git push origin main (уся історія) і
+- Перезапустити панель: Activity (перенос рядків, без шуму тунелю) і нові
+  кнопки вікна.
+- Після цього пуш робить сам: git push origin main (уся історія) і
   git push origin v1.0 v2.0.
 - Старий/v2 GUI (gui/main_window_v2.py, setup_guide_v2.py,
   start_gui_v2.bat, gitignored) - не чіпати: користувач хоче колись
