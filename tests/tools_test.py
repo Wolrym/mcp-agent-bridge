@@ -291,6 +291,33 @@ def test_skills() -> None:
     local = call(TERM, "get_skill", name="local", project=str(PROJECT))
     check("project skills are found", "Project skill." in local or "# local" in local, local[:120])
 
+    # bin/ parks skills: never listed, never loaded.
+    skill(SKILLS / "bin" / "parked", "parked", "Switched off.")
+    listing = call(TERM, "list_skills")
+    check("bin/ is hidden from the list", "parked" not in listing and "bin/" not in listing, listing[:300])
+    check("bin/ skills cannot be loaded", "Switched off." not in call(TERM, "get_skill", name="parked"))
+    check("without project there is a hint", "project=" in listing)
+
+    # Both scopes together, instruction files, the project wins a clash.
+    skill(PROJECT / ".agents" / "skills" / "core-one", "core-one", "Project flavour.")
+    skill(PROJECT / ".agent" / "skills" / "older", "older", "Antigravity folder.")
+    (PROJECT / "AGENTS.md").write_text("# rules\nuse tabs\n", encoding="utf-8")
+    both = call(TERM, "list_skills", project=str(PROJECT))
+    check("global and project skills in one list", "The main skill." in both and "Project skill." in both, both[:400])
+    check("instruction files are listed", "AGENTS.md" in both and "CLAUDE.md (" not in both, both[-400:])
+    check("an override is marked", "overrides the global one" in both, both[-400:])
+    check(".agent/skills is read too", "Antigravity folder." in both)
+    clash = call(TERM, "get_skill", name="core-one", project=str(PROJECT))
+    check("the project skill wins a name clash", "Project flavour." in clash, clash[:200])
+
+    # Packing for upload: the folder itself goes into the zip.
+    from core import skills as skills_module
+
+    archive = skills_module.pack(SKILLS / "design" / "pretty", TEMP)
+    with zipfile.ZipFile(archive) as packed:
+        names = sorted(packed.namelist())
+    check("pack keeps the folder layout", names == ["pretty/SKILL.md", "pretty/references/a.md"], str(names))
+
 
 def main() -> int:
     tests = [

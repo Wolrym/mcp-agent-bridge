@@ -362,22 +362,27 @@ def register(mcp) -> None:
     def list_skills(query: str = "", group: str = "", project: str = "") -> str:
         """List the available skills (instructions for specific kinds of work).
 
-        Without arguments: the bridge's own skills with descriptions, plus
-        skill groups collapsed to one line each. Re-scanned on every call.
+        Global skills (the bridge's own, groups collapsed to one line) and,
+        with `project`, that project's skills and its instruction files
+        (AGENTS.md, CLAUDE.md, GEMINI.md). Call it with `project` before the
+        first change in a project. Re-scanned on every call.
 
         Args:
             query: Case-insensitive filter on name and description, across
                 every group.
             group: Show the skills of one group, e.g. "design".
-            project: A project folder; its .agents/skills, .claude/skills
-                and .opencode/skills are listed too.
+            project: Absolute project folder: adds its .agents/skills,
+                .agent/skills, .claude/skills, .opencode/skills and its
+                instruction files.
         """
         try:
             found = skills.discover(project or None)
         except Exception as exc:  # noqa: BLE001
             return f"Error: {exc}"
-        if not found:
-            return f"No skills found in {skills.skills_root()}"
+        instructions = skills.project_instructions(project or None)
+        if not found and not instructions:
+            where = f"{skills.skills_root()}" + (f" or {project}" if project else "")
+            return f"No skills found in {where}"
 
         needle = query.strip().lower()
         wanted = group.strip().strip("/").lower()
@@ -405,16 +410,35 @@ def register(mcp) -> None:
             if s["group"] and s["origin"] == "bridge":
                 groups.setdefault(s["group"], []).append(s["slug"])
 
-        lines = [f"Skills in {skills.skills_root()}:", ""]
+        lines = [f"Global skills ({skills.skills_root()}):", ""]
         lines += [skills.describe(s) for s in core] or ["(no top-level skills)"]
         if groups:
             lines += ["", "Groups (list_skills(group=...) shows descriptions):"]
             for name, members in sorted(groups.items()):
                 preview = ", ".join(members[:6]) + (", ..." if len(members) > 6 else "")
                 lines.append(f"- {name}/  {len(members)} skills: {preview}")
+        if not project:
+            lines += ["", "Pass project=<folder> to add that project's own skills "
+                          "and its AGENTS.md / CLAUDE.md."]
+            return "\n".join(lines)
+
+        lines += ["", f"Project {project}:"]
+        if instructions:
+            lines.append("Instructions - read these before changing anything:")
+            lines += [
+                f"- {path.name} ({size} B)" if size < 1024 else f"- {path.name} ({size / 1024:.1f} KB)"
+                for path, size in instructions
+            ]
         if local:
-            lines += ["", f"Project skills ({project}):"]
-            lines += [skills.describe(s) for s in local]
+            shadowed = {s["slug"].lower() for s in core} | {s["name"].lower() for s in core}
+            lines.append("Project skills (they win over a global skill with the same name):")
+            for s in local:
+                note = "  [overrides the global one]" if (
+                    s["slug"].lower() in shadowed or s["name"].lower() in shadowed
+                ) else ""
+                lines.append(skills.describe(s) + note)
+        if not instructions and not local:
+            lines.append("(no AGENTS.md / CLAUDE.md and no project skills)")
         return "\n".join(lines)
 
     @mcp.tool()
@@ -422,7 +446,7 @@ def register(mcp) -> None:
         """Fetch the full text of a skill, plus the list of its bundled files.
 
         Args:
-            name: Skill name, e.g. "mcp-coding-agent" or "design/impeccable".
+            name: Skill name, e.g. "mcp-coding-agent-v2" or "design/impeccable".
             project: Project folder, to also search its own skills.
         """
         if not name.strip():

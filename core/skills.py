@@ -7,7 +7,17 @@ Where skills come from:
   (for example `skills/design/impeccable`). Groups keep big third-party
   collections from flooding every list_skills reply;
 * optionally a project's own skills, in the places coding agents look:
-  `.agents/skills`, `.claude/skills` and `.opencode/skills`.
+  `.agents/skills` (the shared standard), `.agent/skills`,
+  `.claude/skills` and `.opencode/skills`. Like Claude Code, OpenCode and
+  Antigravity, the bridge lists both scopes together; on a name clash the
+  project's skill wins, because it is the more specific one.
+
+`skills/bin/` is a parking spot: skills kept there are never listed or
+loaded, so a folder can be switched off without deleting it.
+
+A project's instruction files (AGENTS.md, CLAUDE.md, GEMINI.md) are not
+skills, but they are found here too, so one list_skills(project=...) call
+tells an agent everything it should read before touching the project.
 
 Everything is re-scanned on every call, so new skills appear with no
 indexing step. The root is resolved lazily rather than stored as an
@@ -20,7 +30,11 @@ from pathlib import Path
 from core.config import PROJECT_ROOT, settings
 
 SKILL_FILE = "SKILL.md"
-PROJECT_SKILL_DIRS = (".agents/skills", ".claude/skills", ".opencode/skills", ".opencode/skill")
+PROJECT_SKILL_DIRS = (
+    ".agents/skills", ".agent/skills", ".claude/skills", ".opencode/skills", ".opencode/skill",
+)
+INSTRUCTION_FILES = ("AGENTS.md", "CLAUDE.md", "GEMINI.md")
+HIDDEN = {"bin"}  # folders under the skills root that are never listed
 MAX_BUNDLED = 40
 _NOISE = {".git", "__pycache__", "node_modules", ".DS_Store"}
 
@@ -114,6 +128,8 @@ def _children(folder: Path) -> list:
 def _scan(root: Path, origin: str, allow_groups: bool) -> list:
     found = []
     for entry in _children(root):
+        if origin == "bridge" and entry.name.lower() in HIDDEN:
+            continue
         skill = _skill(entry, "", origin)
         if skill:
             found.append(skill)
@@ -131,6 +147,22 @@ def project_roots(project: str | Path | None) -> list:
         return []
     base = Path(project).expanduser()
     return [base / rel for rel in PROJECT_SKILL_DIRS if (base / rel).is_dir()]
+
+
+def project_instructions(project: str | Path | None) -> list:
+    """The project's agent instruction files, as (path, size in bytes)."""
+    if not project:
+        return []
+    base = Path(project).expanduser()
+    found = []
+    for name in INSTRUCTION_FILES:
+        path = base / name
+        if path.is_file():
+            try:
+                found.append((path, path.stat().st_size))
+            except OSError:
+                continue
+    return found
 
 
 def discover(project: str | Path | None = None) -> list:
@@ -191,3 +223,28 @@ def bundled_files(skill: dict) -> list:
             found.append("... (more files not listed)")
             break
     return found
+
+
+def pack(folder: str | Path, destination: str | Path) -> Path:
+    """Zip one skill folder for uploading elsewhere (Notion, claude.ai, ...).
+
+    The archive holds the folder itself (`<name>/SKILL.md`, `<name>/...`),
+    which is the layout skill uploaders expect. Caches and VCS folders are
+    left out. Returns the written path.
+    """
+    import zipfile
+
+    source = Path(folder).expanduser().resolve()
+    if not (source / SKILL_FILE).is_file():
+        raise ValueError(f"{source} has no {SKILL_FILE}, so it is not a skill folder")
+    target = Path(destination).expanduser()
+    if target.is_dir():
+        target = target / f"{source.name}.zip"
+    target.parent.mkdir(parents=True, exist_ok=True)
+    with zipfile.ZipFile(target, "w", zipfile.ZIP_DEFLATED) as archive:
+        for path in sorted(source.rglob("*")):
+            relative = path.relative_to(source)
+            if not path.is_file() or any(part in _NOISE for part in relative.parts):
+                continue
+            archive.write(path, (Path(source.name) / relative).as_posix())
+    return target
