@@ -671,6 +671,9 @@ class Group(QWidget):
             item = self._rows.takeAt(0)
             widget = item.widget()
             if widget is not None:
+                # Hidden at once: deleteLater only runs on the next loop turn,
+                # and until then the old row would still paint under the new.
+                widget.hide()
                 widget.deleteLater()
 
     def set_caption(self, text: str) -> None:
