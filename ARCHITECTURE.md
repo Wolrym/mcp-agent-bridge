@@ -13,6 +13,7 @@ Single Python codebase (3.10+), no PowerShell orchestration, no Node.
 run_core.py                 headless entry point + ServerSupervisor + port checks
 start.bat / start_gui.bat   launchers (with a console)
 tools/make_shortcuts.py     creates the windowless and the debug shortcut
+tools/pack_skill.py         packs one skill folder into a .zip (Notion upload)
 assets/                     app icon (.ico for Windows, .png)
 config/settings.json        runtime settings (gitignored)
 core/
@@ -42,7 +43,8 @@ gui/
   theme.qss                 stylesheet; colours are @tokens
   widgets/                  tokens (colours), icons, primitives, frameless
                             chrome, setup guide
-skills/mcp-coding-agent/    the original skill (kept as it was)
+skills/legacy/              the original skill (kept as it was, not listed as top level)
+skills/bin/                 parked skills, never listed (gitignored)
 skills/mcp-coding-agent-v2/ the same skill, updated for the current tools
 skills/<group>/             third-party skills, local only (gitignored)
 tests/                      runnable check scripts, no framework
@@ -132,14 +134,26 @@ streams to a file under `.mcp-runs/`:
 
 ### Skills
 
-`skills/` holds the bridge's own skills at the top level. A folder
-without a `SKILL.md` that contains skill folders is a group (`design/`,
-`animation/`, `frontend/`); `list_skills` shows groups collapsed to one
-line, and `list_skills(group=...)` opens one. Projects can bring their
-own skills in `.agents/skills`, `.claude/skills` or `.opencode/skills`;
-`list_skills(project=...)` and `get_skill(name, project=...)` include
-them, and a project skill wins a name clash. Front matter supports YAML
-block scalars (`description: >-`). `get_skill` lists every bundled file.
+Two scopes, listed together, the way Claude Code, OpenCode and
+Antigravity do it:
+
+- **Global** - `skills/` in the bridge. Top-level skills are shown
+  directly; a folder without a `SKILL.md` that contains skill folders is a
+  group (`design/`, `legacy/`, ...), shown collapsed to one line and
+  opened with `list_skills(group=...)`. `skills/bin/` is never listed:
+  park a skill there to switch it off without deleting it.
+- **Project** - `.agents/skills`, `.agent/skills`, `.claude/skills`,
+  `.opencode/skills` inside the project. `list_skills(project=...)` and
+  `get_skill(name, project=...)` include them, and a project skill wins a
+  name clash (marked "overrides the global one").
+
+`list_skills(project=...)` also lists the project's instruction files
+(`AGENTS.md`, `CLAUDE.md`, `GEMINI.md`) with their size, so the agent
+reads them before its first change; the skills tell it to. Front matter
+supports YAML block scalars (`description: >-`). `get_skill` lists every
+bundled file. `core.skills.pack()` / `tools/pack_skill.py` / the guide's
+"Pack as .zip" button zip one skill as `<name>/SKILL.md ...` - the layout
+Notion's "Upload skill" and other agents accept.
 
 ### Startup, ports and logs
 
