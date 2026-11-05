@@ -142,9 +142,12 @@ replaced with defaults. Useful keys:
 ## Logs
 
 The panel's Activity page shows one line per tool call (tool, key
-arguments, duration, error); the Calls and Problems filters narrow it down. The same lines go to `logs/bridge.log`
-(rotated at about 1 MB), so a panel started without a console can still
-be diagnosed.
+arguments, duration, error) plus server and tunnel events; long lines wrap
+under their message. Calls shows only tool calls, Problems only warnings
+and errors. Everything also goes to `logs/bridge.log` (rotated at about
+1 MB), including cloudflared's start-up details, which the panel leaves
+out. cloudflared lines that only mean a client hung up ("context
+canceled", "stream ... canceled by remote with error code 0") are dropped.
 
 ## Cloudflare Tunnel
 

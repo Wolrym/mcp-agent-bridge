@@ -6,6 +6,7 @@ it. No PowerShell orchestration and no orphaned windows.
 """
 from __future__ import annotations
 
+import re
 import shutil
 import subprocess
 import threading
@@ -22,19 +23,66 @@ except AttributeError:  # pragma: no cover - non-Windows
     _CREATION_FLAGS = 0
 
 
-def classify_line(text: str):
-    """Log level for one line of child output, or None to drop it.
+# cloudflared prefixes every line with its own UTC time and level; the log
+# already has a local time, so only the level is kept.
+_CF_PREFIX = re.compile(r"^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d(?:\.\d+)?Z\s+(INF|WRN|ERR|DBG|FTL)\s+")
+_CF_LEVEL = {"INF": "info", "DBG": "debug", "WRN": "warn", "ERR": "warn", "FTL": "error"}
 
-    cloudflared tags its own lines INF / WRN / ERR. Its ERR lines used to
-    land in the log as plain info, while the most common one - "context
-    canceled" - only means the MCP client hung up on a request, which
-    clients do all the time. That one is dropped; real errors are warnings.
+# A client hanging up on a request, which MCP clients do all the time:
+# "context canceled", or a stream reset with code 0 (NO_ERROR) - the
+# Streamable HTTP client closing a response it has finished reading.
+_HANGUPS = ("context canceled", "canceled by remote with error code 0")
+
+# Start-up chatter that is fine to keep in the log file but buries the
+# useful lines in the panel: the connectivity table, passed prechecks,
+# TLS curve lists, the ICMP proxy and the metrics server.
+_CHATTER = re.compile(
+    r"^(?:[|+]|precheck component=.*status=pass|precheck complete hard_fail=false"
+    r"|Tunnel connection curve preferences|ICMP proxy will use|Starting metrics server"
+    r"|Generated Connector ID|Initial protocol|Settings: |Version |GOOS: |"
+    r"cloudflared will not automatically update|Autoupdate frequency)"
+)
+_REGISTERED = "Registered tunnel connection "
+_FIELD = re.compile(r"(\w+)=(\S+)")
+
+
+def tidy_line(text: str):
+    """(level, message) for one line of child output, or None to drop it.
+
+    cloudflared tags its own lines INF / WRN / ERR; its ERR lines used to
+    land in the panel as plain info, and most of them only meant that a
+    client hung up. Those are dropped, real errors become warnings, and
+    start-up chatter is kept at debug level (log file only).
     """
-    if "context canceled" in text:
+    text = text.strip()
+    if not text:
         return None
-    if " ERR " in text or " WRN " in text:
-        return "warn"
-    return "info"
+    level = "info"
+    match = _CF_PREFIX.match(text)
+    if match:
+        level = _CF_LEVEL[match.group(1)]
+        text = text[match.end():]
+    elif " ERR " in text or " WRN " in text:
+        level = "warn"
+    if any(marker in text for marker in _HANGUPS):
+        return None
+    if text.startswith("precheck") and "status=fail" in text:
+        return "warn", text
+    if _CHATTER.match(text):
+        return "debug", text
+    if text.startswith(_REGISTERED):
+        fields = dict(_FIELD.findall(text))
+        index = fields.get("connIndex", "")
+        number = str(int(index) + 1) if index.isdigit() else index
+        where = ", ".join(fields[k] for k in ("location", "protocol") if fields.get(k))
+        return level, f"Tunnel connection {number} registered" + (f" ({where})" if where else "")
+    return level, text
+
+
+def classify_line(text: str):
+    """Log level for one line of child output, or None to drop it."""
+    tidy = tidy_line(text)
+    return tidy[0] if tidy else None
 
 
 class ManagedProcess:
@@ -141,10 +189,9 @@ class ManagedProcess:
         if stream is None:
             return
         for line in stream:
-            text = line.rstrip()
-            level = classify_line(text) if text else None
-            if level:
-                logs.log(self.name, text, level=level)
+            tidy = tidy_line(line)
+            if tidy:
+                logs.log(self.name, tidy[1], level=tidy[0])
         code = process.wait()
         if self._stopping:
             self._stopping = False
