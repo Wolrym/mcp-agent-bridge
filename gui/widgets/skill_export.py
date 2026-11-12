@@ -53,7 +53,7 @@ class SkillExportDialog(QDialog):
         intro = QLabel(
             "Choose skills to export into Downloads. One zip: a folder per skill, "
             "unpack it into any .agents/skills. One zip per skill: for upload "
-            "forms (Notion: Library > Skills > Upload skill)."
+            "forms (Skills > Upload skill)."
         )
         intro.setWordWrap(True)
         layout.addWidget(intro)

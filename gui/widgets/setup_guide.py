@@ -326,8 +326,7 @@ class SetupGuideDialog(QDialog):
                 6,
                 "Export zips chosen skills into Downloads: one archive to "
                 "unpack into any .agents/skills, or one per skill for upload "
-                "forms (Notion: Library > Skills > More ways to add a skill > "
-                "Upload skill).",
+                "forms (Agent Library > Skills > Upload skill).",
             )
         )
         page.add(instructions)
@@ -538,7 +537,7 @@ class SetupGuideDialog(QDialog):
         box.setWindowTitle("Skill packed")
         box.setText(f"Saved {archive.name} ({archive.stat().st_size / 1024:.0f} KB) to {archive.parent}.")
         box.setInformativeText(
-            "Notion: Library > Skills > More ways to add a skill > Upload skill."
+            "Agent interface: Skills > Upload skill."
         )
         show = box.addButton("Show in folder", QMessageBox.ActionRole)
         box.addButton(QMessageBox.Close)
