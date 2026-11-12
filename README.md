@@ -20,7 +20,7 @@ Dual streamable MCP servers for file system operations and terminal execution wi
 
 ## Overview
 
-**MCP Agent Bridge** connects remote and local AI agents (such as Notion AI, Claude Code, Cursor, or VS Code) to your local Windows environment via two dedicated HTTP MCP servers:
+**MCP Agent Bridge** connects remote and local AI agents (such as Claude Code, Cursor, VS Code, or custom cloud agents) to your local Windows environment via two dedicated HTTP MCP servers:
 
 - 📂 **Files System (`:9500`)**: Safe file reading (paged text, auto-image detection), editing with atomic replacements, file tree management, undo backups, and binary zip packing.
 - ⚡ **Terminal (`:9501`)**: Command execution (`cmd.exe`), long-running background processes, stream monitoring with regex triggers, skill catalogs (`AGENTS.md`, `CLAUDE.md`, `npx skills`), and Telegram notifications.
@@ -31,9 +31,9 @@ For technical architecture details and design philosophy, see [ARCHITECTURE.md](
 
 ---
 
-## Visual Showcase
-
-### Interactive Application Tour
+<details>
+<summary><b>🎬 Visual Showcase (Interface Tour & Screenshots)</b></summary>
+<br/>
 
 <div align="center">
   <img src="assets/screenshots/demo.gif" alt="MCP Agent Bridge UI Tour" width="850" />
@@ -41,14 +41,10 @@ For technical architecture details and design philosophy, see [ARCHITECTURE.md](
 
 <br/>
 
-<details open>
-<summary><b>📸 Interface Highlights</b></summary>
-<br/>
-
 | 🎛️ Control Panel (Overview) | ⚡ Fast Setup Guide |
 |:---:|:---:|
 | <img src="assets/screenshots/overview.png" alt="Overview" width="450" /> | <img src="assets/screenshots/setup_guide.png" alt="Setup Guide" width="450" /> |
-| *Live port monitoring, status indicators & one-click start/stop* | *Ready-to-paste agent configurations for Notion AI, Claude & Cursor* |
+| *Live port monitoring, status indicators & one-click start/stop* | *Ready-to-paste agent configurations for Claude, Cursor & IDEs* |
 
 | 🛡️ Security Guardrails | 🌐 Cloudflare Tunnel Routing |
 |:---:|:---:|
@@ -72,9 +68,9 @@ For technical architecture details and design philosophy, see [ARCHITECTURE.md](
 ## Supported Clients
 
 Compatible with any MCP client supporting HTTP endpoints with Bearer authentication:
-- **Notion AI**: Custom agent connections over Cloudflare Tunnel
 - **Claude Code**: Direct local connection (`http://127.0.0.1:9500/mcp`) or remote tunnel
 - **Cursor & VS Code**: Remote agent tools integration
+- **Web & Cloud Agents**: Custom connections over Cloudflare Tunnel
 - Any custom MCP client or orchestration script
 
 ---
@@ -110,7 +106,7 @@ python tools\make_shortcuts.py --desktop
 
 1. Launch the control panel and click **Start everything** in the sidebar.
 2. Click **Setup guide** on the Overview page.
-3. Copy your server endpoints, authentication Bearer token, and agent connection snippet directly into your MCP client (Notion AI, Claude Code, Cursor).
+3. Copy your server endpoints, authentication Bearer token, and agent connection snippet directly into your MCP client (Claude Code, Cursor, custom agents).
 
 ---
 

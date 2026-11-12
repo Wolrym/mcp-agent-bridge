@@ -2,6 +2,7 @@
 mcp[cli]>=1.2.0,<2
 uvicorn>=0.30
 starlette>=0.37
+pyyaml>=6.0
 
 # Control panel (optional - only needed for `python -m gui.app`)
 PySide6>=6.6
