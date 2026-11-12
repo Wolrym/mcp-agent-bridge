@@ -31,14 +31,16 @@ For technical architecture details and design philosophy, see [ARCHITECTURE.md](
 
 ---
 
-<details>
-<summary><b>🎬 Visual Showcase (Interface Tour & Screenshots)</b></summary>
-<br/>
+## Visual Showcase
 
 <div align="center">
   <img src="assets/screenshots/demo.gif" alt="MCP Agent Bridge UI Tour" width="850" />
 </div>
 
+<br/>
+
+<details>
+<summary><b>📸 Detailed Interface Screenshots (Overview, Setup Guide, Security, Tunnel)</b></summary>
 <br/>
 
 | 🎛️ Control Panel (Overview) | ⚡ Fast Setup Guide |
