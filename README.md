@@ -1,54 +1,130 @@
+<div align="center">
+
+<img src="assets/icon.png" alt="MCP Agent Bridge Logo" width="80" height="80" />
+
 # MCP Agent Bridge
 
-Two MCP servers that give an AI agent real hands on this Windows machine -
-one for files, one for commands, background jobs and skills - with token
-auth, live project switching, an undo history and an optional Cloudflare
-Tunnel for remote clients. Pure Python, with a PySide6 control panel.
+**Give AI agents real hands on your Windows machine.**  
+Dual streamable MCP servers for file system operations and terminal execution with token authentication, safety guards, undo history, and an optional Cloudflare Tunnel.
 
-See `ARCHITECTURE.md` for the design and the reasoning behind it.
+[![Python](https://img.shields.io/badge/Python-3.10%2B-3776AB?style=flat-square&logo=python&logoColor=white)](https://www.python.org/)
+[![GUI](https://img.shields.io/badge/GUI-PySide6-41CD52?style=flat-square&logo=qt&logoColor=white)](https://www.qt.io/)
+[![Protocol](https://img.shields.io/badge/Protocol-Model_Context_Protocol-6B46C1?style=flat-square)](https://modelcontextprotocol.io/)
+[![Platform](https://img.shields.io/badge/Platform-Windows-0078D6?style=flat-square&logo=windows&logoColor=white)](https://microsoft.com/windows)
+[![CI](https://img.shields.io/badge/CI-Passing-brightgreen?style=flat-square&logo=githubactions&logoColor=white)](.github/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg?style=flat-square)](LICENSE)
 
-## Works with
+</div>
 
-Any MCP client that can reach a remote (streamable HTTP) server and send a
-Bearer token - for example Notion AI custom connections, Claude Code,
-Cursor or VS Code. A client on the same machine can use
-`http://127.0.0.1:9500/mcp` and `http://127.0.0.1:9501/mcp` directly; the
-tunnel is only needed for clients that run elsewhere.
+---
 
-## Quick start (Windows)
+## Overview
 
-1. **Python 3.10+** from [python.org](https://www.python.org/downloads/)
-   (tick "Add python.exe to PATH"), then in the project folder:
+**MCP Agent Bridge** connects remote and local AI agents (such as Notion AI, Claude Code, Cursor, or VS Code) to your local Windows environment via two dedicated HTTP MCP servers:
+
+- 📂 **Files System (`:9500`)**: Safe file reading (paged text, auto-image detection), editing with atomic replacements, file tree management, undo backups, and binary zip packing.
+- ⚡ **Terminal (`:9501`)**: Command execution (`cmd.exe`), long-running background processes, stream monitoring with regex triggers, skill catalogs (`AGENTS.md`, `CLAUDE.md`, `npx skills`), and Telegram notifications.
+
+Both servers feature single-token Bearer authentication, request rate limiting, project-scoped isolation, dangerous command blocking, and a native **PySide6 desktop control panel**.
+
+For technical architecture details and design philosophy, see [ARCHITECTURE.md](ARCHITECTURE.md).
+
+---
+
+## Visual Showcase
+
+### Interactive Application Tour
+
+<div align="center">
+  <img src="assets/screenshots/demo.gif" alt="MCP Agent Bridge UI Tour" width="850" />
+</div>
+
+<br/>
+
+<details open>
+<summary><b>📸 Interface Highlights</b></summary>
+<br/>
+
+| 🎛️ Control Panel (Overview) | ⚡ Fast Setup Guide |
+|:---:|:---:|
+| <img src="assets/screenshots/overview.png" alt="Overview" width="450" /> | <img src="assets/screenshots/setup_guide.png" alt="Setup Guide" width="450" /> |
+| *Live port monitoring, status indicators & one-click start/stop* | *Ready-to-paste agent configurations for Notion AI, Claude & Cursor* |
+
+| 🛡️ Security Guardrails | 🌐 Cloudflare Tunnel Routing |
+|:---:|:---:|
+| <img src="assets/screenshots/security.png" alt="Security" width="450" /> | <img src="assets/screenshots/tunnel.png" alt="Tunnel" width="450" /> |
+| *Accident guard, token regenerator & directory boundary checks* | *Effortless remote access ingress configuration* |
+
+</details>
+
+---
+
+## Key Features
+
+- 🛡️ **Accident Guard & Security**: Token-authenticated requests (`Authorization: Bearer <token>`), 20-failure IP rate limiting, project root containment, and hard-blocked catastrophic commands (`format`, `diskpart`, `shutdown`, app termination).
+- 🔄 **Undo History**: Optional rollback history stored in `.mcp-backups/` allows instant reversion of modified or deleted files.
+- 🌐 **Remote Tunnel Integration**: Built-in supervisor for Cloudflare Tunnel (`cloudflared`) to expose local servers over secure HTTPS subdomains for cloud agents.
+- 🎯 **Zero Redundant Overhead**: Results sent once as clean plain text, avoiding FastMCP's duplicate structured payload and halving agent token costs.
+- 📦 **Skills Ecosystem**: Discover and pack skills across bridge core, project definitions (`AGENTS.md`, `CLAUDE.md`, `GEMINI.md`), and installed tools.
+
+---
+
+## Supported Clients
+
+Compatible with any MCP client supporting HTTP endpoints with Bearer authentication:
+- **Notion AI**: Custom agent connections over Cloudflare Tunnel
+- **Claude Code**: Direct local connection (`http://127.0.0.1:9500/mcp`) or remote tunnel
+- **Cursor & VS Code**: Remote agent tools integration
+- Any custom MCP client or orchestration script
+
+---
+
+## Quick Start (Windows)
+
+### 1. Prerequisites & Installation
+
+1. Install **Python 3.10+** from [python.org](https://www.python.org/downloads/) (make sure to check **"Add python.exe to PATH"**).
+2. Clone the repository and install requirements:
    ```cmd
+   git clone git@github.com:Wolrym/mcp-agent-bridge.git
+   cd mcp-agent-bridge
    pip install -r requirements.txt
    ```
-2. **cloudflared** (only for remote clients):
-   `winget install Cloudflare.cloudflared`
-3. Create the shortcuts once - nothing is built or installed:
+3. *(Optional for remote clients)* Install **cloudflared**:
    ```cmd
-   python tools\make_shortcuts.py            :: add --desktop for desktop copies
+   winget install Cloudflare.cloudflared
    ```
-   **MCP Agent Bridge** opens the panel without a console window (log in
-   `logs\bridge.log`); **MCP Agent Bridge (debug)** keeps a console open
-   with the live log and any traceback. Shortcuts hold absolute paths, so
-   run the script again after moving or renaming the folder.
-   `start_gui.bat` and `python -m gui.app` still work too.
-4. On the **Tunnel** page set the base domain and your user prefix,
-   point it at your cloudflared `config.yml`, then press **Start
-   everything** at the top of the sidebar.
-5. Open **Setup guide**: it has the endpoint URLs, the token, a config
-   snippet and a ready-made "connect an MCP server" request to copy.
 
-Headless:
+### 2. Launching the Control Panel
 
+Generate desktop shortcuts with one command:
 ```cmd
-python run_core.py                 :: servers + tunnel
-python run_core.py --no-tunnel     :: local only
-python run_core.py --print-config  :: token, ports, projects, endpoints
+python tools\make_shortcuts.py --desktop
 ```
 
-Settings-only commands (safer than editing the JSON by hand):
+- **MCP Agent Bridge**: Starts the GUI panel silently in the background (activity logged to `logs\bridge.log`).
+- **MCP Agent Bridge (debug)**: Launches with an attached console for real-time tracebacks.
+- You can also start via `start_gui.bat` or `python -m gui.app`.
 
+### 3. Connect Your Agent
+
+1. Launch the control panel and click **Start everything** in the sidebar.
+2. Click **Setup guide** on the Overview page.
+3. Copy your server endpoints, authentication Bearer token, and agent connection snippet directly into your MCP client (Notion AI, Claude Code, Cursor).
+
+---
+
+## Headless CLI Mode
+
+If you prefer running without the desktop GUI:
+
+```cmd
+python run_core.py                 :: servers + cloudflared tunnel
+python run_core.py --no-tunnel     :: local HTTP servers only
+python run_core.py --print-config  :: inspect tokens, ports, and endpoints
+```
+
+Manage configuration directly via CLI flags:
 ```cmd
 python run_core.py --set-tunnel-config "C:\Users\<you>\.cloudflared\config.yml"
 python run_core.py --domain example.com --user-slug alex
@@ -58,134 +134,119 @@ python run_core.py --enable-backups
 python run_core.py --regenerate-token
 ```
 
-Only one instance can hold the ports: do not run `run_core.py` and the
-control panel at the same time. A second panel refuses to start.
+> [!NOTE]
+> Only one process can bind to ports 9500 and 9501 at a time. Do not run `run_core.py` and the GUI panel simultaneously.
 
-When sharing the folder, leave out `config/settings.json` (it holds your
-token and is recreated on first launch), `logs/`, `.mcp-runs/`,
-`.mcp-backups/` and `__pycache__/`.
+---
 
-## Tools
+## Tools Reference
 
-**Files System** (port 9500)
+### 📂 Files System (`http://127.0.0.1:9500/mcp`)
 
-| Tool | What it does |
-| --- | --- |
-| `read_file` | Paged text read (`offset`/`limit`, long lines clipped); PNG/JPEG/GIF/WebP come back as images |
-| `read_multiple_files` | Several files in one call, each paged |
-| `write_file` | Create or replace; keeps the existing line endings and BOM |
-| `edit_file` | Exact snippet replace (`replace_all`, `dry_run`); refuses non-UTF-8 files instead of corrupting them |
-| `list_directory`, `get_file_info` | Listing (capped) and metadata |
-| `search_files`, `grep` | Glob and regex search, skipping `.git`, `node_modules` and friends |
-| `create_directory`, `move_file`, `delete_file` | The usual, with undo |
-| `list_changes`, `undo_change` | Undo history (when backups are enabled) |
-| `pack_files`, `unpack_files` | Base64 zip transfer to and from an agent's own sandbox - for images, PDFs, office files, whole folders |
+| Tool | Description |
+|:---|:---|
+| `read_file` | Paged text reading (`offset`/`limit`). Image formats (PNG/JPEG/GIF/WebP) return directly as image media. |
+| `read_multiple_files` | Reads multiple files concurrently in a single tool call. |
+| `write_file` | Creates or overwrites files while preserving line endings and byte-order marks (BOM). |
+| `edit_file` | Precise snippet replacement (`replace_all`, `dry_run`). Rejects non-UTF-8 targets to prevent corruption. |
+| `list_directory` | Lists directory contents with item limits. |
+| `get_file_info` | Retrieves comprehensive file metadata and timestamps. |
+| `search_files` | Glob search skipping ignore directories (`.git`, `node_modules`, etc.). |
+| `grep` | Fast regex text search across project files. |
+| `create_directory` | Creates directory hierarchies. |
+| `move_file` | Moves or renames files and folders with backup tracking. |
+| `delete_file` | Deletes files with undo support. |
+| `list_changes` | Displays historical file modification records. |
+| `undo_change` | Rolls back a specific modification using `.mcp-backups/`. |
+| `pack_files` | Zips and base64 encodes files or folders for transfer to agent sandboxes. |
+| `unpack_files` | Extracts base64 zip archives into the target workspace. |
 
-**Terminal** (port 9501) - commands go through `cmd.exe`
+### ⚡ Terminal (`http://127.0.0.1:9501/mcp`)
 
-| Tool | What it does |
-| --- | --- |
-| `run_command` | Runs a command and waits up to 45 s; if it is still running it stays alive in the background and the reply gives its job id |
-| `start_process` | Starts a dev server, watcher or long build in the background |
-| `wait_process` | Waits for a job and returns early when it ends or a line matches `until` (regex); `tail` for the last lines |
-| `get_output`, `stop_process`, `list_processes` | Job output (paged or `tail`), stop the whole process tree, list jobs |
-| `get_active_project` | The default folder, whether outside access is allowed, other projects |
-| `list_skills`, `get_skill` | Global skills - the bridge's own (`skills/core/`) and those installed with `npx skills` (`skills/.agents/skills/`), grouped by folder or by `skills/categories.json` - plus project skills (`.agents/skills`, `.agent/skills`, `.claude/skills`, `.opencode/skills`) and the project's `AGENTS.md` / `CLAUDE.md` / `GEMINI.md`; `skills/bin/` is hidden. `tools/pack_skill.py` zips one, several or all skills |
-| `notify_user` | Telegram "task finished" message, if configured |
+| Tool | Description |
+|:---|:---|
+| `run_command` | Executes commands through `cmd.exe`. Waits up to 45s before backgrounding and returning a process job ID. |
+| `start_process` | Spawns long-running dev servers, background workers, or build processes. |
+| `wait_process` | Awaits process completion or until standard output matches a regex (`until`). |
+| `get_output` | Reads process console output (supports pagination and `tail`). |
+| `stop_process` | Terminates a process and its full process sub-tree. |
+| `list_processes` | Lists all active and recent background process jobs. |
+| `get_active_project` | Returns the active project directory and permission boundaries. |
+| `list_skills` | Discovers available skills from core, project rules (`AGENTS.md`, `CLAUDE.md`), and `npx skills`. |
+| `get_skill` | Retrieves detailed instructions and commands for a specific skill. |
+| `notify_user` | Sends a Telegram completion alert to the user. |
 
-Every result is sent once, as plain text. (FastMCP's default also sends a
-structured copy, which doubles what the agent pays for each reply.)
+---
 
-## Projects and paths
+## Security Model
 
-The active project is the default for relative paths and for commands
-without `cwd`. It is read on every call, so switching takes effect at
-once - for every connected agent, because they all share this machine.
-Agents should therefore use absolute paths. File tools refuse paths
-outside the active project unless `security.allow_outside_project` is on.
+- 🔑 **Full PC Control**: `run_command` operates under user privileges. Keep the Bearer token secure. Regenerate it immediately if exposed.
+- 🚦 **Brute-Force Rate Limiting**: 20 failed token attempts within 5 minutes triggers a 15-minute IP ban (HTTP 429). Supports `CF-Connecting-IP` behind Cloudflare.
+- 🔒 **Accident Guard**: Blocks system destruction commands (`format`, `diskpart`, `shutdown`, root deletion) and process killers targeting the app or its tunnel.
+- 📁 **Project Isolation**: Restricts file modifications strictly within the active project directory unless explicitly overridden by `security.allow_outside_project`.
+- 🛡️ **Protected Settings**: Prevents connected agents from tampering with `config/settings.json`.
 
-## Security
+---
 
-- **The token is full control of this PC.** `run_command` runs anything
-  the user can run, so the path checks of the file tools are a convenience,
-  not a sandbox. Keep the token secret; regenerate it if it leaks.
-- Every request needs `Authorization: Bearer <token>` (`X-API-Key` and
-  `X-Auth-Token` also work). 20 wrong tokens from one address within five
-  minutes block that address for 15 minutes (HTTP 429); behind the tunnel
-  the real address comes from `CF-Connecting-IP`.
-- `/health` needs no token and reveals only `{"status", "server"}`.
-- An accident guard (`security.block_dangerous_commands`, on by default)
-  refuses a short list of commands that wreck a machine (`format`,
-  `diskpart`, `shutdown`, deleting a drive root, ...) or kill this app or
-  its tunnel (`taskkill /im python.exe`, `cloudflared tunnel delete`, ...).
-- Agents cannot overwrite `config/settings.json` through the file tools
-  (`security.allow_settings_edit`).
+## Configuration
 
-## Settings
+Settings are saved in `config/settings.json` (auto-generated on initial launch). Recommended adjustments:
 
-`config/settings.json` is created on first run. Prefer the panel or the
-CLI flags: an invalid file is moved aside as `settings.broken.json` and
-replaced with defaults. Useful keys:
+| Parameter | Default | Description |
+|:---|:---:|:---|
+| `limits.command_timeout` | `45` | Execution wait threshold before backgrounding (seconds) |
+| `limits.max_output_chars` | `100000` | Output character truncation ceiling |
+| `limits.max_read_lines` | `900` | Default line limit for `read_file` |
+| `limits.max_image_bytes` | `5000000` | Maximum image size returned inline (bytes) |
+| `limits.max_pack_mb` | `25` | Maximum archive payload size (MB) |
+| `servers.session_idle_seconds` | `900` | Automatic cleanup threshold for idle MCP sessions |
+| `security.allow_outside_project` | `false` | Allow file tools to traverse outside project root |
+| `security.block_dangerous_commands` | `true` | Prevent destructive system commands |
+| `backups.enabled` | `false` | Enable snapshot backups for undo operations |
 
-| Key | Default | Meaning |
-| --- | --- | --- |
-| `limits.command_timeout` | 45 | How long `run_command` waits before backgrounding (never more than 50) |
-| `limits.max_output_chars` | 100000 | Cap on one command output or file page |
-| `limits.max_read_lines` | 900 | Default page size of `read_file` |
-| `limits.max_image_bytes` | 5000000 | Largest image `read_file` returns |
-| `limits.max_pack_mb` | 25 | Largest `pack_files` / `unpack_files` archive |
-| `servers.session_idle_seconds` | 900 | Drop MCP sessions idle this long |
-| `security.allow_outside_project` | false | Let file tools leave the active project |
-| `security.block_dangerous_commands` | true | Accident guard |
-| `backups.enabled` | false | Keep the undo history in `.mcp-backups/` |
+---
 
-## Logs
+## Cloudflare Tunnel Setup
 
-The panel's Activity page shows one line per tool call (tool, key
-arguments, duration, error) plus server and tunnel events; long lines wrap
-under their message. Calls shows only tool calls, Problems only warnings
-and errors. Everything also goes to `logs/bridge.log` (rotated at about
-1 MB), including cloudflared's start-up details, which the panel leaves
-out. cloudflared lines that only mean a client hung up ("context
-canceled", "stream ... canceled by remote with error code 0") are dropped.
-
-## Cloudflare Tunnel
-
-One-time setup, with your own tunnel name and hostnames:
+Expose your servers to remote agents using `cloudflared`:
 
 ```cmd
 cloudflared tunnel login
 cloudflared tunnel create mcp-agent-bridge
-cloudflared tunnel route dns mcp-agent-bridge alex-files.example.com
-cloudflared tunnel route dns mcp-agent-bridge alex-term.example.com
+cloudflared tunnel route dns mcp-agent-bridge files.example.com
+cloudflared tunnel route dns mcp-agent-bridge term.example.com
 ```
 
-Ingress in the cloudflared config, keeping `http_status:404` last:
-
+Configure `config.yml`:
 ```yaml
 tunnel: mcp-agent-bridge
 credentials-file: C:\Users\<you>\.cloudflared\<tunnel-id>.json
 ingress:
-  - hostname: alex-files.example.com
+  - hostname: files.example.com
     service: http://localhost:9500
-  - hostname: alex-term.example.com
+  - hostname: term.example.com
     service: http://localhost:9501
   - service: http_status:404
 ```
 
-cloudflared runs as a child process of the panel: it starts with it and
-stops when the panel exits. A wildcard CNAME (`*` -> your tunnel) lets
-every teammate pick a prefix without touching DNS.
+---
 
-## Tests
+## Running Tests
 
-Plain scripts, each safe to run while the real panel is live (throwaway
-settings, ports 9400/9401 at most):
+Run the test suite to verify tool integrity and authentication:
 
 ```cmd
-python tests\tools_test.py     :: tool behaviour through FastMCP
-python tests\smoke_test.py     :: both servers over HTTP: auth, tool lists, /health
-python tests\jobs_test.py
-python tests\backups_test.py
-python tests\test_notifier.py
+python tests\smoke_test.py     :: Server HTTP verification, auth & tool manifests
+python tests\tools_test.py     :: FastMCP tool behavior verification
+python tests\jobs_test.py      :: Background process management
+python tests\backups_test.py   :: File undo and backup history
+python tests\test_notifier.py  :: User notifications
 ```
+
+---
+
+## Contributing & License
+
+Contributions, issues, and feature suggestions are welcome! Please review [CONTRIBUTING.md](CONTRIBUTING.md) before submitting pull requests.
+
+Distributed under the [MIT License](LICENSE).
